@@ -1,0 +1,789 @@
+{
+  "spec": "v4",
+  "entry": [
+    "흐름.md"
+  ],
+  "stats": {
+    "files": 8,
+    "nodes": 9,
+    "edges": 14,
+    "diagnostics": 2,
+    "nodesByKind": {
+      "doc": 2,
+      "ghost": 1,
+      "task": 6
+    },
+    "edgesByType": {
+      "call": 7,
+      "mention": 2,
+      "ref": 5
+    },
+    "diagnosticsBySeverity": {
+      "error": 2
+    }
+  },
+  "nodes": [
+    {
+      "id": "검토.md",
+      "kind": "task",
+      "title": "검토",
+      "desc": "바뀐 파일을 읽고 문제를 찾는다.",
+      "headings": [
+        {
+          "level": 1,
+          "text": "검토",
+          "line": 1,
+          "subagent": false,
+          "body": "바뀐 파일을 읽고 문제를 찾는다.",
+          "range": {
+            "start": 10,
+            "end": 54
+          }
+        },
+        {
+          "level": 2,
+          "text": "받는 것",
+          "line": 5,
+          "subagent": false,
+          "body": "- 변경파일",
+          "range": {
+            "start": 70,
+            "end": 84
+          }
+        },
+        {
+          "level": 2,
+          "text": "하는 일",
+          "line": 8,
+          "subagent": false,
+          "body": "바뀐 파일을 읽고 [코딩규칙](코딩규칙.md)과 [검토기준](검토기준.md)대로 확인한다. 지적이 없으면 \"통과\"라고만 적는다.",
+          "range": {
+            "start": 101,
+            "end": 260
+          }
+        },
+        {
+          "level": 2,
+          "text": "지적이 크면 (최대 2번)",
+          "line": 12,
+          "subagent": false,
+          "body": "[구현](구현.md)에 {{>지적사항}}을 전달해 고치게 한다. 구현이 다시 검토를 부르므로 문서 사이에 순환이 생긴다 — 뷰어가 이 간선을 순환으로 표시한다.",
+          "range": {
+            "start": 297,
+            "end": 500
+          }
+        },
+        {
+          "level": 2,
+          "text": "내는 것",
+          "line": 16,
+          "subagent": false,
+          "body": "- 지적사항 — `파일:줄` / 무엇이 문제인가 / 어떻게 고칠까",
+          "range": {
+            "start": 516,
+            "end": 594
+          }
+        },
+        {
+          "level": 2,
+          "text": "심어 둔 문제",
+          "line": 19,
+          "subagent": false,
+          "body": "`검토기준.md` 는 없는 파일이다. `L-N01` 이 잡고 고스트 노드로 남는다.",
+          "range": {
+            "start": 618,
+            "end": 710
+          }
+        }
+      ],
+      "contract": {
+        "inputs": [
+          "변경파일"
+        ],
+        "outputs": [
+          "지적사항"
+        ]
+      },
+      "hash": "884e0d3710897f242ff75c3092d36c89133ce03b"
+    },
+    {
+      "id": "검토기준.md",
+      "kind": "ghost",
+      "title": "검토기준.md",
+      "desc": "",
+      "headings": [],
+      "contract": null,
+      "hash": ""
+    },
+    {
+      "id": "계획.md",
+      "kind": "task",
+      "title": "계획",
+      "desc": "조사 결과를 받아 작업 순서를 정한다.",
+      "headings": [
+        {
+          "level": 1,
+          "text": "계획",
+          "line": 1,
+          "subagent": false,
+          "body": "조사 결과를 받아 작업 순서를 정한다.",
+          "range": {
+            "start": 10,
+            "end": 61
+          }
+        },
+        {
+          "level": 2,
+          "text": "받는 것",
+          "line": 5,
+          "subagent": false,
+          "body": "- 조사결과",
+          "range": {
+            "start": 77,
+            "end": 91
+          }
+        },
+        {
+          "level": 2,
+          "text": "하는 일",
+          "line": 8,
+          "subagent": false,
+          "body": "의존성으로 순서를 정한다. 항목은 5개를 넘기지 않는다. 항목마다 무엇을 / 어디를 / 어떻게 확인할지 적는다.\n새 기능은 [구조](구조.md#확장)가 말하는 자리에 붙인다.",
+          "range": {
+            "start": 108,
+            "end": 329
+          }
+        },
+        {
+          "level": 2,
+          "text": "내는 것",
+          "line": 13,
+          "subagent": false,
+          "body": "- 계획 — 위 형식의 목록",
+          "range": {
+            "start": 345,
+            "end": 378
+          }
+        }
+      ],
+      "contract": {
+        "inputs": [
+          "조사결과"
+        ],
+        "outputs": [
+          "계획"
+        ]
+      },
+      "hash": "b65dd89550cdd3f9cd9bff4f07a1153bdfaac0e8"
+    },
+    {
+      "id": "구조.md",
+      "kind": "doc",
+      "title": "프로젝트 구조",
+      "desc": "",
+      "headings": [
+        {
+          "level": 1,
+          "text": "프로젝트 구조",
+          "line": 1,
+          "subagent": false,
+          "body": "",
+          "range": {
+            "start": 22,
+            "end": 22
+          }
+        },
+        {
+          "level": 2,
+          "text": "레이어",
+          "line": 3,
+          "subagent": false,
+          "body": "UI → 뷰 모델 → 도메인 서비스 → 저장소 어댑터. 의존 방향은 왼쪽에서 오른쪽 한 방향이다.",
+          "range": {
+            "start": 50,
+            "end": 174
+          }
+        },
+        {
+          "level": 2,
+          "text": "확장 지점",
+          "line": 7,
+          "subagent": false,
+          "body": "새 기능은 도메인 서비스에 붙인다. UI에 직접 붙이지 않는다.",
+          "range": {
+            "start": 204,
+            "end": 285
+          }
+        }
+      ],
+      "contract": null,
+      "hash": "62414cda852dfea34b4b6341d7f37f16f0c5f0ee"
+    },
+    {
+      "id": "구현.md",
+      "kind": "task",
+      "title": "구현",
+      "desc": "계획 또는 지적사항을 받아 코드를 고친다. 이 흐름에서 유일하게 소스를 쓰는 작업이다.",
+      "headings": [
+        {
+          "level": 1,
+          "text": "구현",
+          "line": 1,
+          "subagent": false,
+          "body": "계획 또는 지적사항을 받아 코드를 고친다. 이 흐름에서 유일하게 소스를 쓰는 작업이다.",
+          "range": {
+            "start": 10,
+            "end": 128
+          }
+        },
+        {
+          "level": 2,
+          "text": "받는 것",
+          "line": 5,
+          "subagent": false,
+          "body": "- 계획\n- 지적사항",
+          "range": {
+            "start": 144,
+            "end": 167
+          }
+        },
+        {
+          "level": 2,
+          "text": "하는 일",
+          "line": 9,
+          "subagent": false,
+          "body": "받은 항목을 적힌 순서대로 처리한다. 한 항목이 끝날 때마다 검증하고 한 줄로 보고한다.\n[코딩규칙](코딩규칙.md)을 반드시 지킨다. 계획에 없는 변경이 필요하면 수행 전에 이유를 먼저 적는다.\n다 고치면 [검토](검토.md)에 {{>변경파일}}을 전달해 {{<지적사항}}을 받고, 지적이 있으면 반영한다.",
+          "range": {
+            "start": 184,
+            "end": 572
+          }
+        },
+        {
+          "level": 2,
+          "text": "내는 것",
+          "line": 15,
+          "subagent": false,
+          "body": "- 변경파일 — 바꾼 파일 경로와 변경 요지 한 줄씩\n- 지적사항 — 검토가 마지막에 남긴 것. 없으면 \"통과\"",
+          "range": {
+            "start": 588,
+            "end": 728
+          }
+        }
+      ],
+      "contract": {
+        "inputs": [
+          "계획",
+          "지적사항"
+        ],
+        "outputs": [
+          "변경파일",
+          "지적사항"
+        ]
+      },
+      "hash": "239f4d04fe197ccb5ac13be648347648ebbb19d5"
+    },
+    {
+      "id": "정리.md",
+      "kind": "task",
+      "title": "정리",
+      "desc": "앞 단계 결과를 받지 않는다. 흐름 끝에서 한 번 돌린다.",
+      "headings": [
+        {
+          "level": 1,
+          "text": "정리",
+          "line": 1,
+          "subagent": false,
+          "body": "앞 단계 결과를 받지 않는다. 흐름 끝에서 한 번 돌린다.",
+          "range": {
+            "start": 10,
+            "end": 84
+          }
+        },
+        {
+          "level": 2,
+          "text": "하는 일",
+          "line": 5,
+          "subagent": false,
+          "body": "이 저장소의 문서를 훑고 코드와 어긋나는 서술을 찾는다. 되돌리는 절차는 [구조](구조.md#되돌리기)를 따른다. 고치지 않고 `파일:줄`과 한 줄 근거만 낸다.",
+          "range": {
+            "start": 101,
+            "end": 307
+          }
+        },
+        {
+          "level": 2,
+          "text": "심어 둔 문제",
+          "line": 9,
+          "subagent": false,
+          "body": "`#되돌리기` 앵커는 `구조.md` 에 없다. `L-N09` 가 잡는다.",
+          "range": {
+            "start": 331,
+            "end": 403
+          }
+        }
+      ],
+      "contract": null,
+      "hash": "75e5675aee1f619a7c1bc22f34911221e4e3f40a"
+    },
+    {
+      "id": "조사.md",
+      "kind": "task",
+      "title": "조사",
+      "desc": "파일 하나를 읽고 바꿔야 할 곳을 찾는다. 파일마다 독립이라 따로 돌려도 된다.",
+      "headings": [
+        {
+          "level": 1,
+          "text": "조사",
+          "line": 1,
+          "subagent": false,
+          "body": "파일 하나를 읽고 바꿔야 할 곳을 찾는다. 파일마다 독립이라 따로 돌려도 된다.",
+          "range": {
+            "start": 10,
+            "end": 116
+          }
+        },
+        {
+          "level": 2,
+          "text": "받는 것",
+          "line": 5,
+          "subagent": false,
+          "body": "- 대상파일",
+          "range": {
+            "start": 132,
+            "end": 146
+          }
+        },
+        {
+          "level": 2,
+          "text": "하는 일",
+          "line": 8,
+          "subagent": false,
+          "body": "파일을 읽고 [구조](구조.md#레이어)에 비춰 어긋난 곳을 찾는다. 확신이 없으면 \"불확실\"이라고 적는다.",
+          "range": {
+            "start": 163,
+            "end": 299
+          }
+        },
+        {
+          "level": 2,
+          "text": "내는 것",
+          "line": 12,
+          "subagent": false,
+          "body": "- 조사결과 — 세 줄. 무슨 일을 하는 파일인가 / 바꿔야 할 `파일:줄` / 불확실 여부",
+          "range": {
+            "start": 315,
+            "end": 424
+          }
+        }
+      ],
+      "contract": {
+        "inputs": [
+          "대상파일"
+        ],
+        "outputs": [
+          "조사결과"
+        ]
+      },
+      "hash": "49cc3a00c759fd2791c416d2db06785ff8a3038d"
+    },
+    {
+      "id": "코딩규칙.md",
+      "kind": "doc",
+      "title": "코딩 규칙",
+      "desc": "- 파일명은 소문자 하이픈.",
+      "headings": [
+        {
+          "level": 1,
+          "text": "코딩 규칙",
+          "line": 1,
+          "subagent": false,
+          "body": "- 파일명은 소문자 하이픈. `user-profile.ts`\n- 불린 변수는 `is` 나 `has` 로 시작한다\n- 에러를 삼키지 않는다. 로그만 남기고 넘어가는 코드를 새로 만들지 않는다",
+          "range": {
+            "start": 17,
+            "end": 224
+          }
+        }
+      ],
+      "contract": null,
+      "hash": "32ac96d760e2fb8749ae0029e339e33b54298d22"
+    },
+    {
+      "id": "흐름.md",
+      "kind": "task",
+      "title": "기능 개발",
+      "desc": "요청 하나를 조사 → 계획 → 구현 → 검토 순서로 처리한다. 검토에서 지적이 나오면 구현으로 되돌아간다.",
+      "headings": [
+        {
+          "level": 1,
+          "text": "기능 개발",
+          "line": 1,
+          "subagent": false,
+          "body": "요청 하나를 조사 → 계획 → 구현 → 검토 순서로 처리한다. 검토에서 지적이 나오면 구현으로 되돌아간다.",
+          "range": {
+            "start": 17,
+            "end": 160
+          }
+        },
+        {
+          "level": 2,
+          "text": "1. 조사",
+          "line": 5,
+          "subagent": true,
+          "body": "대상파일마다 [조사](조사.md)에 {{>대상파일}}을 전달해 {{<조사결과}}를 받는다.",
+          "range": {
+            "start": 205,
+            "end": 309
+          }
+        },
+        {
+          "level": 2,
+          "text": "2. 계획",
+          "line": 9,
+          "subagent": false,
+          "body": "[계획](계획.md)에 {{>조사결과}}를 전달해 {{<계획}}을 받는다.",
+          "range": {
+            "start": 325,
+            "end": 404
+          }
+        },
+        {
+          "level": 2,
+          "text": "3. 구현",
+          "line": 13,
+          "subagent": false,
+          "body": "[구현](구현.md)에 {{>계획}}을 전달해 {{<변경파일}}을 받는다.",
+          "range": {
+            "start": 420,
+            "end": 499
+          }
+        },
+        {
+          "level": 2,
+          "text": "4. 검토",
+          "line": 17,
+          "subagent": true,
+          "body": "[검토](검토.md)에 {{>변경파일}}을 전달해 {{<지적사항}}을 받는다.",
+          "range": {
+            "start": 544,
+            "end": 629
+          }
+        },
+        {
+          "level": 2,
+          "text": "5. 지적이 있으면",
+          "line": 21,
+          "subagent": false,
+          "body": "[구현](구현.md)에 {{>지적사항}}을 전달해 {{<변경파일}}을 다시 받는다. 지적이 없을 때까지 반복한다.",
+          "range": {
+            "start": 658,
+            "end": 791
+          }
+        },
+        {
+          "level": 2,
+          "text": "6. 정리",
+          "line": 25,
+          "subagent": false,
+          "body": "[정리](정리.md)를 돌린다.",
+          "range": {
+            "start": 807,
+            "end": 840
+          }
+        }
+      ],
+      "contract": null,
+      "hash": "38a860e11a444aa24acdc41828118078db3e44b2"
+    }
+  ],
+  "edges": [
+    {
+      "from": "검토.md",
+      "to": "검토기준.md",
+      "type": "mention",
+      "line": 10,
+      "under": [
+        "검토",
+        "하는 일"
+      ],
+      "sends": [],
+      "returns": [],
+      "isolated": false,
+      "range": {
+        "start": 160,
+        "end": 191
+      }
+    },
+    {
+      "from": "검토.md",
+      "to": "코딩규칙.md",
+      "type": "ref",
+      "line": 10,
+      "under": [
+        "검토",
+        "하는 일"
+      ],
+      "sends": [],
+      "returns": [],
+      "isolated": false,
+      "range": {
+        "start": 125,
+        "end": 156
+      }
+    },
+    {
+      "from": "검토.md",
+      "to": "구현.md",
+      "type": "call",
+      "line": 14,
+      "under": [
+        "검토",
+        "지적이 크면 (최대 2번)"
+      ],
+      "sends": [
+        "지적사항"
+      ],
+      "returns": [],
+      "isolated": false,
+      "range": {
+        "start": 297,
+        "end": 316
+      }
+    },
+    {
+      "from": "계획.md",
+      "to": "구조.md",
+      "type": "ref",
+      "line": 10,
+      "under": [
+        "계획",
+        "하는 일"
+      ],
+      "sends": [],
+      "returns": [],
+      "isolated": false,
+      "range": {
+        "start": 269,
+        "end": 295
+      },
+      "anchor": "확장"
+    },
+    {
+      "from": "구현.md",
+      "to": "검토.md",
+      "type": "call",
+      "line": 11,
+      "under": [
+        "구현",
+        "하는 일"
+      ],
+      "sends": [
+        "변경파일"
+      ],
+      "returns": [
+        "지적사항"
+      ],
+      "isolated": false,
+      "range": {
+        "start": 456,
+        "end": 475
+      }
+    },
+    {
+      "from": "구현.md",
+      "to": "코딩규칙.md",
+      "type": "ref",
+      "line": 11,
+      "under": [
+        "구현",
+        "하는 일"
+      ],
+      "sends": [],
+      "returns": [],
+      "isolated": false,
+      "range": {
+        "start": 304,
+        "end": 335
+      }
+    },
+    {
+      "from": "정리.md",
+      "to": "구조.md",
+      "type": "ref",
+      "line": 7,
+      "under": [
+        "정리",
+        "하는 일"
+      ],
+      "sends": [],
+      "returns": [],
+      "isolated": false,
+      "range": {
+        "start": 202,
+        "end": 234
+      },
+      "anchor": "되돌리기"
+    },
+    {
+      "from": "조사.md",
+      "to": "구조.md",
+      "type": "ref",
+      "line": 10,
+      "under": [
+        "조사",
+        "하는 일"
+      ],
+      "sends": [],
+      "returns": [],
+      "isolated": false,
+      "range": {
+        "start": 180,
+        "end": 209
+      },
+      "anchor": "레이어"
+    },
+    {
+      "from": "흐름.md",
+      "to": "조사.md",
+      "type": "call",
+      "line": 7,
+      "under": [
+        "기능 개발",
+        "1. 조사"
+      ],
+      "sends": [
+        "대상파일"
+      ],
+      "returns": [
+        "조사결과"
+      ],
+      "isolated": true,
+      "range": {
+        "start": 224,
+        "end": 243
+      }
+    },
+    {
+      "from": "흐름.md",
+      "to": "계획.md",
+      "type": "call",
+      "line": 11,
+      "under": [
+        "기능 개발",
+        "2. 계획"
+      ],
+      "sends": [
+        "조사결과"
+      ],
+      "returns": [
+        "계획"
+      ],
+      "isolated": false,
+      "range": {
+        "start": 325,
+        "end": 344
+      }
+    },
+    {
+      "from": "흐름.md",
+      "to": "구현.md",
+      "type": "call",
+      "line": 15,
+      "under": [
+        "기능 개발",
+        "3. 구현"
+      ],
+      "sends": [
+        "계획"
+      ],
+      "returns": [
+        "변경파일"
+      ],
+      "isolated": false,
+      "range": {
+        "start": 420,
+        "end": 439
+      }
+    },
+    {
+      "from": "흐름.md",
+      "to": "검토.md",
+      "type": "call",
+      "line": 19,
+      "under": [
+        "기능 개발",
+        "4. 검토"
+      ],
+      "sends": [
+        "변경파일"
+      ],
+      "returns": [
+        "지적사항"
+      ],
+      "isolated": true,
+      "range": {
+        "start": 544,
+        "end": 563
+      }
+    },
+    {
+      "from": "흐름.md",
+      "to": "구현.md",
+      "type": "call",
+      "line": 23,
+      "under": [
+        "기능 개발",
+        "5. 지적이 있으면"
+      ],
+      "sends": [
+        "지적사항"
+      ],
+      "returns": [
+        "변경파일"
+      ],
+      "isolated": false,
+      "range": {
+        "start": 658,
+        "end": 677
+      }
+    },
+    {
+      "from": "흐름.md",
+      "to": "정리.md",
+      "type": "mention",
+      "line": 27,
+      "under": [
+        "기능 개발",
+        "6. 정리"
+      ],
+      "sends": [],
+      "returns": [],
+      "isolated": false,
+      "range": {
+        "start": 807,
+        "end": 826
+      }
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "L-N01",
+      "severity": "error",
+      "where": "검토.md:10",
+      "message": "Linked file not found: 검토기준.md",
+      "range": {
+        "start": 160,
+        "end": 191
+      }
+    },
+    {
+      "code": "L-N09",
+      "severity": "error",
+      "where": "정리.md:7",
+      "message": "Anchor not found in the target document: 구조.md#되돌리기",
+      "range": {
+        "start": 202,
+        "end": 234
+      }
+    }
+  ]
+}

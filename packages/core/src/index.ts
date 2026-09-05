@@ -1,0 +1,7 @@
+export * from './ir.ts'
+export { parseDoc, byteOffset, slug } from './parse.ts'
+export type { Doc, Link, Diag } from './parse.ts'
+export { buildGraph, resolve, type BuildOptions } from './graph.ts'
+export { loadDir, existsIn, ALWAYS_EXCLUDE, docCache, type DocCache } from './load.ts'
+export { readConfig, parseConfig, CONFIG_PATH, ENTRY_MAIN, ENTRY_FILES, ENTRY_DIRS, isConventionalEntry, DEFAULT_WORDS, type Config, type Words } from './config.ts'
+export { writeRange, readRange, readLink, retargetLink, replaceBody, replaceBodies, WriteError, type WriteResult } from './writer.ts'

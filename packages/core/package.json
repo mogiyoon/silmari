@@ -1,0 +1,45 @@
+{
+  "name": "@silmari/core",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "github-slugger": "^2.0.0",
+    "ignore": "^7.0.8",
+    "remark-gfm": "^4",
+    "remark-parse": "^11",
+    "unified": "^11",
+    "unist-util-visit": "^5"
+  },
+  "devDependencies": {
+    "@types/mdast": "^4.0.4",
+    "@types/node": "^22",
+    "typescript": "^5.7"
+  },
+  "description": "silmari parser, IR and lint: a set of md documents → a graph",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mogiyoon/silmari",
+    "directory": "packages/core"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  }
+}

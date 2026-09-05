@@ -1,0 +1,201 @@
+// Rule unit tests. Cases absent from the corpus are given as strings. Appendix A.
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { parseDoc, buildGraph, parseConfig } from '../src/index.ts'
+
+const codes = (docs: Record<string, string>) =>
+  buildGraph(new Map(Object.entries(docs).map(([rel, src]) => [rel, parseDoc(rel, src)]))).diagnostics.map((d) => d.code)
+
+const diagsOf = (docs: Record<string, string>) =>
+  buildGraph(new Map(Object.entries(docs).map(([rel, src]) => [rel, parseDoc(rel, src)]))).diagnostics
+
+const TASK = '\n\n## Steps\n\n일.\n' // This heading makes it a task node.
+
+test('L-N05: a link in a heading is not an edge, for task nodes only', () => {
+  assert.ok(codes({ 'a.md': '# A\n\n## [b](b.md) 를 보라' + TASK, 'b.md': '# B\n\n자료.\n' }).includes('L-N05'))
+  assert.ok(!codes({ 'a.md': '# A\n\n## [b](b.md) 를 보라\n\n본문.\n', 'b.md': '# B\n\n자료.\n' }).includes('L-N05'), 'Reference documents stay quiet')
+})
+
+test('L-N06: no H1 or multiple H1 headings, for task nodes only', () => {
+  assert.ok(codes({ 'a.md': '설명만.' + TASK }).includes('L-N06'))
+  assert.ok(codes({ 'a.md': '# 하나\n\n설명.\n\n# 둘' + TASK }).includes('L-N06'))
+  assert.ok(!codes({ 'a.md': '# 하나\n\n설명.' + TASK }).includes('L-N06'))
+  assert.ok(!codes({ 'a.md': '설명만. H1 없는 자료.\n' }).includes('L-N06'), 'Reference documents stay quiet')
+})
+
+test('L-G01: checks orphans only in projects with at least one call edge', () => {
+  const orphan = { 'x.md': '# X\n\n아무도 안 부르는 자료.\n' }
+  assert.ok(!codes({ ...orphan, 'r.md': '# R\n\n[y](y.md) 를 본다.\n', 'y.md': '# Y\n\n자료.\n' }).includes('L-G01'), 'Projects without notation stay quiet')
+  assert.ok(codes({ ...orphan, 'a.md': '# A\n\n[b](b.md) 에 {{>v}} 를 넘긴다.\n', 'b.md': '# B' + TASK }).includes('L-G01'))
+})
+
+test('L-G06: checks only calls with data; referring to a document twice is valid', () => {
+  assert.ok(!codes({ 'a.md': '# A\n\n[d](d.md) 를 본다.\n\n[d](d.md) 를 또 본다.\n', 'd.md': '# D\n\n자료.\n' }).includes('L-G06'))
+})
+
+test('L-N13: {{ }} without a link is an error', () => {
+  assert.ok(codes({ 'a.md': '# A\n\n{{>x}} 를 넘긴다.\n' }).includes('L-N13'))
+  assert.ok(codes({ 'a.md': '# A\n\n{{>x}} 를 [b](b.md) 에 넘긴다.\n', 'b.md': '# B\n\n## Steps\n\n일.\n' }).includes('L-N13'), 'It is also an error before the first link')
+})
+
+test('L-N04: name syntax', () => {
+  assert.ok(codes({ 'a.md': '# A\n\n[b](b.md) 에 {{>왼쪽 값}} 을 넘긴다.\n', 'b.md': '# B\n\n## Steps\n\n일.\n' }).includes('L-N04'))
+})
+
+test('L-N15: retired each-item marker {{*}} gives a warning and is read as a send', () => {
+  const ds = diagsOf({ 'a.md': '# A\n\n[b](b.md) 에 {{*x}} 를 넘긴다.\n', 'b.md': '# B\n\n## Inputs\n- x\n\n## Steps\n\n일.\n' })
+  assert.ok(ds.some((d) => d.code === 'L-N15' && d.severity === 'warning'))
+  assert.ok(!ds.some((d) => d.code === 'L-C01'), 'It is read as a send and passes the contract check')
+})
+
+test('L-C01 / L-C02: a contract mismatch is a warning', () => {
+  const b = '# B\n\n설명.\n\n## Inputs\n- 왼쪽값\n\n## Outputs\n- 합\n'
+  assert.ok(codes({ 'a.md': '# A\n\n[b](b.md) 에 {{>오른쪽값}} 을 넘겨 {{<합}} 을 받는다.\n', 'b.md': b }).includes('L-C01'))
+  assert.ok(codes({ 'a.md': '# A\n\n[b](b.md) 에 {{>왼쪽값}} 을 넘겨 {{<곱}} 을 받는다.\n', 'b.md': b }).includes('L-C02'))
+  assert.ok(!codes({ 'a.md': '# A\n\n[b](b.md) 에 {{>왼쪽값}} 을 넘겨 {{<합}} 을 받는다.\n', 'b.md': b }).some((x) => x.startsWith('L-C')))
+})
+
+test('L-G06: another call without a condition warns; one under a condition heading is valid', () => {
+  const b = '# B\n\n## Steps\n\n일.\n'
+  assert.ok(codes({ 'a.md': '# A\n\n[b](b.md) 에 {{>x}} 를 넘긴다.\n\n[b](b.md) 에 {{>x}} 를 또 넘긴다.\n', 'b.md': b }).includes('L-G06'))
+  assert.ok(!codes({ 'a.md': '# A\n\n## 1\n[b](b.md) 에 {{>x}} 를 넘긴다.\n\n## 문제가 있으면\n[b](b.md) 에 {{>x}} 를 또 넘긴다.\n', 'b.md': b }).includes('L-G06'))
+})
+
+test('External URLs, images, and same-file anchors do not create edges (§1.7)', () => {
+  const g = buildGraph(new Map([['a.md', parseDoc('a.md', '# A\n\n[x](https://x.com) ![i](i.png) [목차](#a) [코드](x.ts)\n')]]))
+  assert.equal(g.edges.length, 0)
+  assert.ok(!g.diagnostics.some((d) => d.code === 'L-N01'))
+})
+
+test('loadDir excludes .gitignore matches and .claude/worktrees', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { loadDir } = await import('../src/load.ts')
+  const d = mkdtempSync(join(tmpdir(), 'sil-'))
+  for (const p of ['a.md', 'Library/x.md', '.claude/worktrees/w/b.md', 'docs/c.md']) { mkdirSync(join(d, p, '..'), { recursive: true }); writeFileSync(join(d, p), '# T\n') }
+  writeFileSync(join(d, '.gitignore'), 'Library/\n')
+  assert.deepEqual([...loadDir(d).keys()], ['a.md', 'docs/c.md'])
+  rmSync(d, { recursive: true })
+})
+
+test('A file outside the scan but present on disk is not a ghost', () => {
+  const docs = new Map([['a.md', parseDoc('a.md', '# A\n\n[n](novel/x.md) 를 본다.\n')]])
+  const g = buildGraph(docs, { exists: (rel) => rel === 'novel/x.md' })
+  assert.equal(g.nodes.find((n) => n.id === 'novel/x.md')?.kind, 'doc')
+  assert.ok(!g.diagnostics.some((d) => d.code === 'L-N01'))
+  assert.ok(buildGraph(docs).diagnostics.some((d) => d.code === 'L-N01'), 'Without exists, it remains a ghost')
+})
+
+test('Adds registered agent frontmatter fields name, tools, and model to the node', () => {
+  const src = '---\nname: verify\ndescription: 검증\ntools: Read, Grep\nmodel: haiku\n---\n\n# 검증\n\n## Steps\n\n본다.\n'
+  const g = buildGraph(new Map([['.claude/agents/verify.md', parseDoc('.claude/agents/verify.md', src)]]))
+  assert.deepEqual(g.nodes[0].agent, { name: 'verify', description: '검증', tools: ['Read', 'Grep'], model: 'haiku' })
+  assert.equal(buildGraph(new Map([['a.md', parseDoc('a.md', '# A\n')]])).nodes[0].agent, undefined, 'Without frontmatter, the key is absent')
+})
+
+test('<!-- sil:ignore L-G01 --> on the first line suppresses only that rule for that file (§1.8)', () => {
+  const base = { 'a.md': '# A\n\n[b](b.md) 에 {{>v}} 를 넘긴다.\n', 'b.md': '# B' + TASK }
+  assert.ok(codes({ ...base, 'x.md': '# X\n\n고아.\n' }).includes('L-G01'))
+  assert.ok(!codes({ ...base, 'x.md': '<!-- sil:ignore L-G01 -->\n# X\n\n고아.\n' }).includes('L-G01'))
+  assert.ok(!codes({ ...base, 'x.md': '---\nsil:\n  type: doc\n---\n<!-- sil:ignore L-G01, L-N06 -->\n# X\n' }).includes('L-G01'), 'The line after frontmatter also works')
+  assert.ok(codes({ ...base, 'x.md': '# X\n\n<!-- sil:ignore L-G01 -->\n' }).includes('L-G01'), 'It is ignored when it is not the first line')
+})
+
+test('L-N17: a received value is used when returned as an output', () => {
+  const b = '# B\n\n## Steps\n\n일.\n\n## Outputs\n- r\n'
+  assert.ok(codes({ 'a.md': '# A\n\n[b](b.md) 에 {{>x}} 를 넘겨 {{<r}} 을 받는다.\n', 'b.md': b }).includes('L-N17'))
+  assert.ok(!codes({ 'a.md': '# A\n\n[b](b.md) 에 {{>x}} 를 넘겨 {{<r}} 을 받는다.\n\n## Outputs\n- r\n', 'b.md': b }).includes('L-N17'))
+})
+
+test('Anchor slugs match github-slugger and preserve double hyphens', async () => {
+  const { slug } = await import('../src/parse.ts')
+  assert.equal(slug('G. 점수 게이트 — 사람이 결정한다'), 'g-점수-게이트--사람이-결정한다')
+  assert.equal(slug('8. 개인정보 주입 + 인쇄'), '8-개인정보-주입--인쇄')
+  assert.equal(slug('2. 검색 조건 확정'), '2-검색-조건-확정')
+  assert.equal(slug('되돌리기 {#x}'.replace(/\s*\{#.*$/, '')), '되돌리기')
+})
+
+test('L-G01: a .claude/commands/ entry point is not an orphan', () => {
+  const base = { 'a.md': '# A\n\n[b](b.md) 에 {{>v}} 를 넘긴다.\n', 'b.md': '# B' + TASK }
+  assert.ok(!codes({ ...base, '.claude/commands/go.md': '# Go\n\n[a](../../a.md) 를 읽는다.\n' }).includes('L-G01'))
+  assert.ok(codes({ ...base, 'docs/x.md': '# X\n\n고아.\n' }).includes('L-G01'))
+})
+
+test('Diagnostic range uses file-based bytes and points to the link with frontmatter (INV-8)', () => {
+  const src = '---\nsil:\n  type: task\n---\n# 가\n\n한글 앞말 [없음](없음.md) 뒤.\n'
+  const g = buildGraph(new Map([['a.md', parseDoc('a.md', src)]]))
+  const d = g.diagnostics.find((x) => x.code === 'L-N01')!
+  const buf = Buffer.from(src, 'utf8')
+  assert.equal(buf.subarray(d.range!.start, d.range!.end).toString('utf8'), '[없음](없음.md)')
+  const n13 = buildGraph(new Map([['b.md', parseDoc('b.md', '# 나\n\n앞 {{>값}} 뒤.\n')]])).diagnostics.find((x) => x.code === 'L-N13')!
+  assert.equal(Buffer.from('# 나\n\n앞 {{>값}} 뒤.\n').subarray(n13.range!.start, n13.range!.end).toString(), '{{>값}}')
+})
+
+test('Heading body keeps source text up to the next heading and lines match with frontmatter', () => {
+  const src = '---\nsil:\n  type: task\n---\n# 제목\n\n설명 한 줄.\n\n## Steps\n\n첫 문단.\n\n- 목록\n\n### 세부\n\n세부 본문.\n\n## Outputs\n- 값\n'
+  const hs = parseDoc('a.md', src).headings
+  assert.deepEqual(hs.map((h) => [h.text, h.body]), [
+    ['제목', '설명 한 줄.'], ['Steps', '첫 문단.\n\n- 목록'], ['세부', '세부 본문.'], ['Outputs', '- 값'],
+  ])
+})
+
+test('Heading body range matches file-based body bytes with frontmatter, BOM, CRLF, and an empty body', () => {
+  const check = (src: string) => {
+    const buf = Buffer.from(src, 'utf8')
+    for (const h of parseDoc('a.md', src).headings) {
+      assert.equal(buf.subarray(h.range.start, h.range.end).toString('utf8'), h.body, `${h.text}: ${JSON.stringify(h.body)}`)
+    }
+  }
+  check('---\nsil:\n  type: task\n---\n# 가\n\n설명.\n\n## Steps\n\n첫 줄.\n둘째 줄.\n\n## 빈 것\n\n## Outputs\n- 값\n')
+  check('﻿# 가\r\n\r\n한글 본문.\r\n\r\n## 둘\r\n본문 둘\r\n')
+  const src = '# 가\n\n## 빈 것\n\n## 다음\n본문\n'
+  const empty = parseDoc('a.md', src).headings.find((h) => h.text === '빈 것')!
+  assert.equal(empty.body, ''); assert.equal(empty.range.start, empty.range.end)
+  assert.equal(Buffer.from(src).subarray(0, empty.range.start).toString(), '# 가\n\n## 빈 것\n', 'The insertion point is right after the heading line')
+})
+
+test('Config reads entry, scan.exclude, and strict; entry points are not orphans', async () => {
+  const { parseConfig, isConventionalEntry, DEFAULT_WORDS } = await import('../src/config.ts')
+  const c = parseConfig('entry: [CLAUDE.md, .claude/commands/go.md]\nscan:\n  exclude: [".sil/backups/**", "tmp/**"]\nstrict: true\n')
+  assert.deepEqual(c, { strict: true, scan: { exclude: ['.sil/backups/**', 'tmp/**'] }, entry: ['CLAUDE.md', '.claude/commands/go.md'], words: DEFAULT_WORDS, lang: 'en' })
+  assert.deepEqual(parseConfig('entry:\n  - AGENTS.md\n  - 흐름.md\n').entry, ['AGENTS.md', '흐름.md'])
+  assert.equal(parseConfig('lang: ja\n').lang, 'ja')
+  assert.deepEqual(parseConfig(''), { strict: false, scan: { exclude: [] }, entry: [], words: DEFAULT_WORDS, lang: 'en' })
+  assert.ok(isConventionalEntry('SILMARI.md') && isConventionalEntry('AGENTS.md') && isConventionalEntry('.github/prompts/x.prompt.md') && !isConventionalEntry('docs/x.md'))
+  const base = { 'a.md': '# A\n\n[b](b.md) 에 {{>v}} 를 넘긴다.\n', 'b.md': '# B' + TASK }
+  const g = buildGraph(new Map(Object.entries({ ...base, '흐름.md': '# 흐름\n\n설명.\n', 'AGENTS.md': '# 규칙\n' }).map(([r, s]) => [r, parseDoc(r, s)])), { entry: ['흐름.md'] })
+  assert.deepEqual(g.entry, ['흐름.md'])
+  assert.ok(!g.diagnostics.some((d) => d.code === 'L-G01'), 'Neither configured entry 흐름 nor conventional entry AGENTS.md is an orphan')
+})
+
+test('L-I04: @ in a heading label is info; legacy notation still enables isolation', () => {
+  const g = buildGraph(new Map([['a.md', parseDoc('a.md', '# A\n\n## 1. 일 [@서브 에이전트]\n\n[b](b.md) 에 {{>x}} 를 넘긴다.\n')], ['b.md', parseDoc('b.md', '# B' + TASK)]]))
+  assert.ok(g.diagnostics.some((d) => d.code === 'L-I04' && d.severity === 'info'))
+  assert.ok(g.edges.some((e) => e.to === 'b.md' && e.isolated))
+  const g2 = buildGraph(new Map([['a.md', parseDoc('a.md', '# A\n\n## 1. 일 [서브 에이전트]\n\n[b](b.md) 에 {{>x}} 를 넘긴다.\n')], ['b.md', parseDoc('b.md', '# B' + TASK)]]))
+  assert.ok(!g2.diagnostics.some((d) => d.code === 'L-I04') && g2.edges.some((e) => e.to === 'b.md' && e.isolated))
+})
+
+test('Isolation labels work only at heading ends; [subagent] inside a title is not a label', () => {
+  const at = (h: string) => buildGraph(new Map([['a.md', parseDoc('a.md', `# A\n\n${h}\n\n[b](b.md) 에 {{>x}} 를 넘긴다.\n`)], ['b.md', parseDoc('b.md', '# B' + TASK)]])).edges.some((e) => e.to === 'b.md' && e.isolated)
+  assert.ok(at('## 1. 일 [서브 에이전트]'))
+  assert.ok(at('## 1. 일 [서브 에이전트로 무조건]  '))
+  assert.ok(!at('## [서브 에이전트] 목록'))
+})
+
+test('Subagent labels are bracket markers at heading ends in any language; contract and task headings use Korean, English, and words config', () => {
+  const iso = (h: string) => buildGraph(new Map([['a.md', parseDoc('a.md', `# A\n\n${h}\n\n[b](b.md) 에 {{>x}} 를 넘긴다.\n`)], ['b.md', parseDoc('b.md', '# B' + TASK)]])).edges.some((e) => e.to === 'b.md' && e.isolated)
+  assert.ok(iso('## 1. Research [subagent]'))
+  assert.ok(iso('## 1. Research [Sub-Agent: isolated]'))
+  assert.ok(iso('## 1. 調査 [サブエージェント]'))
+  assert.ok(iso('## 1. 조사 [서브 에이전트를 무조건 사용한다]'))
+  assert.ok(!iso('## 1. 조사 []'), 'Empty brackets are not a label')
+  const en = parseDoc('b.md', '# B\n\n## Inputs\n- x\n\n## Steps\n\nDo it.\n\n## Outputs\n- y\n')
+  assert.deepEqual([en.contractIn, en.contractOut, en.hasTaskHead], [['x'], ['y'], true])
+  const cfg = parseConfig('words:\n  task: [手順]\n')
+  assert.ok(parseDoc('c.md', '# C\n\n## 手順\n\nやる。\n', cfg.words).hasTaskHead)
+  assert.ok(!parseDoc('c.md', '# C\n\n## Steps\n\n일.\n', cfg.words).hasTaskHead, 'A words key replaces that key entirely')
+  const legacy = parseConfig('contract:\n  inputs: [Given]\n')
+  assert.deepEqual(legacy.words.inputs, ['Given'])
+})
