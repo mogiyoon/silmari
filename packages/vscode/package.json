@@ -1,0 +1,80 @@
+{
+  "name": "silmari-vscode",
+  "displayName": "silmari",
+  "description": "Checks the flow and data between md documents and shows them as a graph — missing files, missing anchors, data without a link, references nobody calls",
+  "version": "0.0.1",
+  "publisher": "mogiyoon",
+  "icon": "images/icon.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mogiyoon/silmari"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Linters",
+    "Visualization"
+  ],
+  "keywords": [
+    "markdown",
+    "agent",
+    "claude",
+    "prompt",
+    "graph"
+  ],
+  "main": "./dist/extension.cjs",
+  "activationEvents": [
+    "onLanguage:markdown",
+    "workspaceContains:**/*.md"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "silmari.view",
+        "title": "silmari: Show graph",
+        "category": "silmari"
+      },
+      {
+        "command": "silmari.lint",
+        "title": "silmari: Check now",
+        "category": "silmari"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "silmari.view",
+          "when": "editorLangId == markdown",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configurationDefaults": {
+      "markdown.validate.enabled": true,
+      "markdown.validate.fragmentLinks.enabled": "warning",
+      "markdown.validate.fileLinks.enabled": "error",
+      "markdown.updateLinksOnFileMove.enabled": "prompt"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "package": "pnpm build && vsce package --no-dependencies --skip-license -o dist/silmari.vsix"
+  },
+  "dependencies": {
+    "@silmari/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@silmari/viewer": "workspace:*",
+    "@types/node": "^22",
+    "@types/vscode": "^1.100.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.7"
+  }
+}
