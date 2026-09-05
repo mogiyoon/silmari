@@ -1,0 +1,35 @@
+{
+  "name": "silmari",
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "sil": "./dist/sil.cjs"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@silmari/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.7",
+    "esbuild": "^0.28.2",
+    "@silmari/viewer": "workspace:*"
+  },
+  "description": "Checks the flow and data between md documents and shows them as a graph — sil lint · sil view",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mogiyoon/silmari",
+    "directory": "packages/cli"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}
