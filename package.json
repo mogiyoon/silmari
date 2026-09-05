@@ -1,0 +1,7 @@
+{
+  "name": "silmari",
+  "private": true,
+  "packageManager": "pnpm@10.18.1",
+  "workspaces": ["packages/*"],
+  "scripts": { "build": "pnpm -r --if-present build", "test": "pnpm -r test", "typecheck": "pnpm -r typecheck" }
+}
