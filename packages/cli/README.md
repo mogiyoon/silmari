@@ -1,5 +1,7 @@
 # silmari
 
+**Keep your docs talking to each other.**
+
 Checks the flow and data in md documents and shows them as a graph. Agent md files are the source, silmari is the compiler, and AI is the runtime.
 
 ```sh

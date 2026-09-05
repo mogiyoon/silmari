@@ -1,6 +1,2 @@
-# silmari settings for the example corpus. The documents are Korean, so the Korean heading words are listed here.
-entry: [흐름.md]
-words:
-  inputs:   [받는 것, 입력, inputs, input]
-  outputs:  [내는 것, 출력, outputs, output]
-  task:     [하는 일, steps, procedure]
+# silmari settings for the golden corpus. The documents are English, so the default contract words (inputs / steps / outputs) apply.
+entry: [flow.md]

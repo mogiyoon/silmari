@@ -31,7 +31,7 @@ test('lint --json: graph matches the expected result', () => {
 
 test('unknown command exits 2', () => { assert.equal(run('nope').status, 2) })
 
-test('view --out: one HTML file containing the IR', { skip: !existsSync(resolve(import.meta.dirname, '../../viewer/dist/index.html')) && '뷰어 미빌드' }, () => {
+test('view --out: one HTML file containing the IR', { skip: !existsSync(resolve(import.meta.dirname, '../../viewer/dist/index.html')) && 'viewer not built' }, () => {
   const out = resolve(tmpdir(), `sil-view-${process.pid}.html`)
   const r = run('view', AFTER, `--out=${out}`)
   assert.equal(r.status, 0)
@@ -60,18 +60,18 @@ test('view server: GET/PUT /file edits the whole file through Writer. A stale ha
   const srv = spawn(process.execPath, ['--experimental-strip-types', MAIN, 'view', root, `--port=${port}`, '--no-open'], { stdio: 'ignore' })
   try {
     for (let i = 0; i < 50; i++) { try { await fetch(`http://127.0.0.1:${port}/graph`); break } catch { await new Promise((r) => setTimeout(r, 100)) } }
-    const g1 = await (await fetch(`http://127.0.0.1:${port}/file?path=${encodeURIComponent('흐름.md')}`)).json() as { text: string; hash: string }
-    assert.equal(g1.text, readFileSync(resolve(AFTER, '흐름.md'), 'utf8'))
-    const text = g1.text.replace('[정리](정리.md)', '[정리](정리2.md)')
-    const r1 = await fetch(`http://127.0.0.1:${port}/file`, { method: 'PUT', body: JSON.stringify({ file: '흐름.md', hash: g1.hash, text }) })
+    const g1 = await (await fetch(`http://127.0.0.1:${port}/file?path=${encodeURIComponent('flow.md')}`)).json() as { text: string; hash: string }
+    assert.equal(g1.text, readFileSync(resolve(AFTER, 'flow.md'), 'utf8'))
+    const text = g1.text.replace('[wrap-up](wrap-up.md)', '[wrap-up](wrap-up2.md)')
+    const r1 = await fetch(`http://127.0.0.1:${port}/file`, { method: 'PUT', body: JSON.stringify({ file: 'flow.md', hash: g1.hash, text }) })
     assert.equal(r1.status, 200)
-    assert.equal(readFileSync(resolve(root, '흐름.md'), 'utf8'), text, 'the file is exactly the text that was sent')
-    const r2 = await fetch(`http://127.0.0.1:${port}/file`, { method: 'PUT', body: JSON.stringify({ file: '흐름.md', hash: g1.hash, text }) })
+    assert.equal(readFileSync(resolve(root, 'flow.md'), 'utf8'), text, 'the file is exactly the text that was sent')
+    const r2 = await fetch(`http://127.0.0.1:${port}/file`, { method: 'PUT', body: JSON.stringify({ file: 'flow.md', hash: g1.hash, text }) })
     assert.equal(r2.status, 409, 'rejects a write with the old hash because the file changed')
     const bad = await fetch(`http://127.0.0.1:${port}/file?path=..%2Fx.md`)
     assert.equal(bad.status, 400, 'no paths outside the root')
     const g2 = await (await fetch(`http://127.0.0.1:${port}/graph`)).json() as { nodes: { id: string; kind: string }[] }
-    assert.equal(g2.nodes.find((n) => n.id === '정리2.md')?.kind, 'ghost', 'included in the rebuilt graph')
+    assert.equal(g2.nodes.find((n) => n.id === 'wrap-up2.md')?.kind, 'ghost', 'included in the rebuilt graph')
   } finally { srv.kill(); rmSync(root, { recursive: true, force: true }) }
 })
 
@@ -85,7 +85,7 @@ test('view server: /layout saves a file only when .sil/ exists', async () => {
   const srv = spawn(process.execPath, ['--experimental-strip-types', MAIN, 'view', root, `--port=${port}`, '--no-open'], { stdio: 'ignore' })
   try {
     for (let i = 0; i < 50; i++) { try { await fetch(`http://127.0.0.1:${port}/graph`); break } catch { await new Promise((r) => setTimeout(r, 100)) } }
-    const body = JSON.stringify({ nodes: { '흐름.md': { x: 1, y: 2 } }, labels: {}, open: [] })
+    const body = JSON.stringify({ nodes: { 'flow.md': { x: 1, y: 2 } }, labels: {}, open: [] })
     assert.equal((await fetch(`http://127.0.0.1:${port}/layout`)).status, 404, 'returns 404 when the file is missing')
     assert.equal((await fetch(`http://127.0.0.1:${port}/layout`, { method: 'PUT', body })).status, 404, 'does not write without .sil')
     assert.ok(!existsSync(resolve(root, '.sil')), 'creates nothing in the repo')
@@ -105,13 +105,13 @@ test('view server: PATCH /body changes only the heading body. A viewer body mism
   try {
     for (let i = 0; i < 50; i++) { try { await fetch(`http://127.0.0.1:${port}/graph`); break } catch { await new Promise((r) => setTimeout(r, 100)) } }
     const g = await (await fetch(`http://127.0.0.1:${port}/graph`)).json() as { nodes: { id: string; hash: string; headings: { text: string; body: string; range: { start: number; end: number } }[] }[] }
-    const node = g.nodes.find((n) => n.id === '정리.md')!
-    const h = node.headings.find((x) => x.text === '하는 일')!
-    const body = { file: '정리.md', start: h.range.start, end: h.range.end, expect: h.body, text: h.body + '\n한 줄 더.', hash: node.hash }
+    const node = g.nodes.find((n) => n.id === 'wrap-up.md')!
+    const h = node.headings.find((x) => x.text === 'Steps')!
+    const body = { file: 'wrap-up.md', start: h.range.start, end: h.range.end, expect: h.body, text: h.body + '\nOne more line.', hash: node.hash }
     const r1 = await fetch(`http://127.0.0.1:${port}/body`, { method: 'PATCH', body: JSON.stringify(body) })
     assert.equal(r1.status, 200)
-    const before = readFileSync(resolve(AFTER, '정리.md'), 'utf8'), after = readFileSync(resolve(root, '정리.md'), 'utf8')
-    assert.equal(after, before.replace(h.body, h.body + '\n한 줄 더.'), 'everything outside that section stays unchanged')
+    const before = readFileSync(resolve(AFTER, 'wrap-up.md'), 'utf8'), after = readFileSync(resolve(root, 'wrap-up.md'), 'utf8')
+    assert.equal(after, before.replace(h.body, h.body + '\nOne more line.'), 'everything outside that section stays unchanged')
     assert.equal((await fetch(`http://127.0.0.1:${port}/body`, { method: 'PATCH', body: JSON.stringify(body) })).status, 409, 'rejects an already changed body')
   } finally { srv.kill(); rmSync(root, { recursive: true, force: true }) }
 })

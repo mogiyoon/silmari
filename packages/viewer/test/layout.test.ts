@@ -97,28 +97,28 @@ test('layout: columns use the shortest path from a root; directly called review 
   const g = buildGraph(loadDir(root, [], readConfig(root).words), { exists: existsIn(root) })
   const { nodes, sameCol } = layout(g, new Set(g.nodes.map((n) => n.id)))
   const x = (id: string) => nodes.get(id)!.x
-  assert.equal(x('검토.md'), x('조사.md'), 'review is in the same column as research, planning, implementation, and summary')
-  assert.ok(x('구조.md') > x('조사.md'))
+  assert.equal(x('review.md'), x('research.md'), 'review is in the same column as research, planning, implementation, and summary')
+  assert.ok(x('structure.md') > x('research.md'))
   const same = [...sameCol].map((i) => `${g.edges[i].from}→${g.edges[i].to}`)
-  assert.ok(same.includes('구현.md→검토.md') && same.includes('검토.md→구현.md'), `same-column edges: ${same.join(', ')}`)
+  assert.ok(same.includes('implement.md→review.md') && same.includes('review.md→implement.md'), `same-column edges: ${same.join(', ')}`)
 })
 
 test('layout: labels on dragged nodes follow them; labels for two nodes that call each other stay beside them without overlap', async () => {
   const root = resolve(import.meta.dirname, '../../core/test/fixtures/after')
   const g = buildGraph(loadDir(root, [], readConfig(root).words), { exists: existsIn(root) })
   const all = new Set(g.nodes.map((n) => n.id))
-  const pinned = { '구현.md': { x: 1000, y: 800 }, '검토.md': { x: 1000, y: 900 } }
+  const pinned = { 'implement.md': { x: 1000, y: 800 }, 'review.md': { x: 1000, y: 900 } }
   const { labels } = layout(g, all, new Set(), undefined, pinned)
   const idx = (a: string, b: string) => g.edges.findIndex((e) => e.from === a && e.to === b)
-  const l1 = labels.get(idx('구현.md', '검토.md'))!, l2 = labels.get(idx('검토.md', '구현.md'))!
+  const l1 = labels.get(idx('implement.md', 'review.md'))!, l2 = labels.get(idx('review.md', 'implement.md'))!
   const w = SIZE.task.w
   assert.ok(l1.x > 1000 + w && l2.x > 1000 + w, `both labels right of nodes: ${l1.x}, ${l2.x}`)
   assert.ok(Math.abs(l1.y - 850) < 160 && Math.abs(l2.y - 850) < 160, `both labels at node height: ${l1.y}, ${l2.y}`)
-  const b1 = labelBox(g.edges[idx('구현.md', '검토.md')]), b2 = labelBox(g.edges[idx('검토.md', '구현.md')])
+  const b1 = labelBox(g.edges[idx('implement.md', 'review.md')]), b2 = labelBox(g.edges[idx('review.md', 'implement.md')])
   assert.ok(Math.abs(l1.y - l2.y) >= (b1.h + b2.h) / 2, 'labels for nodes that call each other do not overlap')
   // Labels on nodes that were not dragged stay between columns
   const base = layout(g, all)
-  const i3 = idx('흐름.md', '조사.md')
+  const i3 = idx('flow.md', 'research.md')
   assert.deepEqual(labels.get(i3), base.labels.get(i3))
 })
 
@@ -126,11 +126,11 @@ test('layout: a label sits at the height of the node it goes to, in child order;
   const root = resolve(import.meta.dirname, '../../core/test/fixtures/after')
   const g = buildGraph(loadDir(root, [], readConfig(root).words), { exists: existsIn(root) })
   const { nodes, labels } = layout(g, new Set(g.nodes.map((n) => n.id)))
-  const idx = (to: string, nth = 0) => g.edges.map((e, i) => ({ e, i })).filter(({ e }) => e.from === '흐름.md' && e.to === to)[nth].i
+  const idx = (to: string, nth = 0) => g.edges.map((e, i) => ({ e, i })).filter(({ e }) => e.from === 'flow.md' && e.to === to)[nth].i
   const center = (id: string) => nodes.get(id)!.y + SIZE.task.h / 2
-  for (const to of ['조사.md', '계획.md', '검토.md', '정리.md']) assert.ok(Math.abs(labels.get(idx(to))!.y - center(to)) < 1, `label to ${to} at its height`)
-  const first = labels.get(idx('구현.md', 0))!, again = labels.get(idx('구현.md', 1))!
-  assert.ok(again.y > first.y && Math.abs((first.y + again.y) / 2 - center('구현.md')) < 1, 'the two calls to 구현 are one group centered on 구현, first above')
+  for (const to of ['research.md', 'plan.md', 'review.md', 'wrap-up.md']) assert.ok(Math.abs(labels.get(idx(to))!.y - center(to)) < 1, `label to ${to} at its height`)
+  const first = labels.get(idx('implement.md', 0))!, again = labels.get(idx('implement.md', 1))!
+  assert.ok(again.y > first.y && Math.abs((first.y + again.y) / 2 - center('implement.md')) < 1, 'the two calls to implement are one group centered on implement, first above')
 })
 
 test('layout: a parent sits at the vertical center of its children block, and the next parent block starts below — A/a1..a4 then B/b1..b3', async () => {
@@ -152,6 +152,6 @@ test("layout option labelOrder 'flow': labels follow the parent's line order top
   const root = resolve(import.meta.dirname, '../../core/test/fixtures/after')
   const g = buildGraph(loadDir(root, [], readConfig(root).words), { exists: existsIn(root) })
   const { labels } = layout(g, new Set(g.nodes.map((n) => n.id)), new Set(), undefined, {}, { labelOrder: 'flow' })
-  const ys = g.edges.map((e, i) => ({ e, i })).filter(({ e, i }) => e.from === '흐름.md' && labels.has(i)).map(({ i }) => labels.get(i)!.y)
+  const ys = g.edges.map((e, i) => ({ e, i })).filter(({ e, i }) => e.from === 'flow.md' && labels.has(i)).map(({ i }) => labels.get(i)!.y)
   for (let k = 1; k < ys.length; k++) assert.ok(ys[k] > ys[k - 1], `label ${k} below label ${k - 1}`)
 })

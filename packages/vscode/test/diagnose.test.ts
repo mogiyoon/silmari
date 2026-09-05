@@ -12,10 +12,10 @@ test('split where', () => {
 
 test('replacing with an unsaved body updates its diagnostics at once (S12)', () => {
   const before = byFile(graphWithOverride(AFTER, ['node_modules']))
-  assert.ok(before.get('검토.md')?.some((d) => d.code === 'L-N01'))
-  // Body with the 검토기준.md link removed from 검토.md
-  const fixed = graphWithOverride(AFTER, ['node_modules'], { rel: '검토.md', text: '# 검토\n\n설명.\n\n## 하는 일\n\n[코딩규칙](코딩규칙.md)을 본다.\n' })
-  assert.ok(!byFile(fixed).get('검토.md')?.some((d) => d.code === 'L-N01'))
+  assert.ok(before.get('review.md')?.some((d) => d.code === 'L-N01'))
+  // Body with the review-criteria.md link removed from review.md
+  const fixed = graphWithOverride(AFTER, ['node_modules'], { rel: 'review.md', text: '# Review\n\nDescription.\n\n## Steps\n\nRead the [coding rules](coding-rules.md).\n' })
+  assert.ok(!byFile(fixed).get('review.md')?.some((d) => d.code === 'L-N01'))
 })
 
 test('toLineCol: Korean byte offset → line and column', async () => {

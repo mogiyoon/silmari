@@ -1,6 +1,7 @@
 <p align="center"><img src="assets/silmari-icon.png" width="120" alt="silmari"></p>
 
-# silmari
+<h1 align="center">silmari</h1>
+<h3 align="center">Keep your docs talking to each other.</h3>
 
 **Checks the flow and data in md documents and shows them as a graph.**
 Agent md files are the source, silmari is the compiler, and AI is the runtime. It is like `tsc`.
@@ -50,6 +51,10 @@ One flow, fully unfolded. Solid lines are calls that carry values, dashed lines 
 The right panel: flows, kinds, the selected node with its prompt (Edit changes heading bodies, Raw edits the whole file), and the diagnostics list.
 
 ![The graph with the side panel: a selected orchestrator and its prompt](assets/silmari-graph-window.png)
+
+The same checks in VS Code's Problems panel: a missing file, a missing anchor, and reference documents nobody links to.
+
+![VS Code Problems panel with silmari diagnostics](assets/silmari-lint-error.png)
 
 ## Usage
 
