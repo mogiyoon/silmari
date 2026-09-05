@@ -6,10 +6,12 @@ Checks the flow and data in md documents and shows them as a graph. Agent md fil
 npm i -g silmari
 
 sil lint                # missing files, missing anchors, data without a link, references nobody calls. --strict exits 1 on error
-sil view                # local server + browser. Redraws within 2 s when an md file changes
+sil view                # local server + browser. Live: redraws when an md file changes
 sil view --out=g.html   # one HTML file, no server
 sil init                # .sil/config.yaml + SILMARI.md. Creates missing agent start files and appends a SILMARI.md call to existing ones
 ```
+
+![sil view: one flow, orchestrators on the left calling agents on the right](https://raw.githubusercontent.com/mogiyoon/silmari/main/assets/silmari-graph.png)
 
 Standard Markdown links are edges. Add values after a link with `{{>send}}` `{{<receive}}`. Headings are conditions. A bracket label at the end of a heading, such as `[use a subagent]`, marks isolation. An md file without notation is not an error.
 

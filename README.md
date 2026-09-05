@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/silmari-icon.png" width="120" alt="silmari"></p>
+
 # silmari
 
 **Checks the flow and data in md documents and shows them as a graph.**
@@ -12,32 +14,42 @@ The VS Code extension marks the same checks with wavy lines as you edit. It open
 
 ## Notation: four things to learn
 
-A standard Markdown link is an edge. Add values after the link with `{{ }}`.
+A standard Markdown link is an edge. Add values after the link with `{{ }}` (the values attach to the link before them in the same paragraph).
 
 ```markdown
-# 기능 개발
+# Feature work
 
-## 1. 조사 [서브 에이전트 사용]
-대상파일마다 [조사](조사.md)에 {{>대상파일}}을 전달해 {{<조사결과}}를 받는다.
+## 1. Research [use a subagent]
+For each target file, call [research](research.md) with {{>target}} and receive {{<findings}}.
 
-## 2. 계획
-[계획](계획.md)에 {{>조사결과}}를 전달해 {{<계획}}을 받는다.
+## 2. Plan
+Call [plan](plan.md) with {{>findings}} and receive {{<plan}}.
 
-## 3. 지적이 있으면
-[구현](구현.md)에 {{>지적사항}}을 전달해 {{<변경파일}}을 다시 받는다.
+## 3. If there are review comments
+Call [implement](implement.md) with {{>comments}} and receive {{<changed-files}} again.
 ```
 
 | Notation | Meaning | For the model |
 |---|---|---|
-| `[조사](조사.md)` | Edge. Caller → callee | "Read that file" |
-| `{{>계획}}` | Send (parameter) | "Pass this value" |
-| `{{<변경파일}}` | Receive (return) | "Keep this value" |
-| `## … [서브 에이전트 사용]` | Calls in that section are isolated. The brackets are the symbol. The text inside can be in any language. In English, use the verb phrase `[use a subagent]` | "Use a subagent" |
+| `[research](research.md)` | Edge. Caller → callee | "Read that file" |
+| `{{>plan}}` | Send (parameter) | "Pass this value" |
+| `{{<changed-files}}` | Receive (return) | "Keep this value" |
+| `## … [use a subagent]` | Calls in that section are isolated. The brackets are the symbol; the words inside can be in any language (`[서브 에이전트 사용]`). In English, use a verb phrase | "Use a subagent" |
 
-Sequence follows line order. A heading (`## 지적이 있으면`) marks a choice. Show repetition by calling again under a condition ("until") or with "each." The only symbols are `>` and `<`.
-In the called file, the lists under `## 받는 것` / `## 하는 일` / `## 내는 것` are the contract. There is no frontmatter.
+Sequence follows line order. A heading (`## If there are review comments`) marks a choice. Show repetition by calling again under a condition ("until") or with "for each". The only symbols are `>` and `<`.
+In the called file, the lists under `## Inputs` / `## Steps` / `## Outputs` are the contract (other languages: set the words in `.sil/config.yaml`). There is no frontmatter.
 
 **An md file without notation is not an error.** Adopt it one file at a time. [packages/core/test/fixtures/after](packages/core/test/fixtures/after) is a small complete example in this notation (it doubles as the golden test corpus).
+
+## What it looks like
+
+One flow, fully unfolded. Solid lines are calls that carry values, dashed lines are references, the green box is a reference document, and the purple border marks a subagent call.
+
+![One flow in sil view: the orchestrators on the left call the agents on the right](assets/silmari-graph.png)
+
+The right panel: flows, kinds, the selected node with its prompt (Edit changes heading bodies, Raw edits the whole file), and the diagnostics list.
+
+![The graph with the side panel: a selected orchestrator and its prompt](assets/silmari-graph-window.png)
 
 ## Usage
 
@@ -60,17 +72,17 @@ VS Code: Install the `silmari` extension to see wavy lines while editing md file
 
 ```sh
 pnpm install
-pnpm build          # viewer → cli → vscode 순으로 묶는다
-pnpm test           # 골든 코퍼스(packages/core/test/fixtures/after) + 규칙 단위 테스트
+pnpm build          # bundles viewer → cli → vscode, in that order
+pnpm test           # golden corpus (packages/core/test/fixtures/after) + rule unit tests
 pnpm --filter silmari-vscode package   # packages/vscode/dist/silmari.vsix
 ```
 
 ```
-packages/core      파서 · IR · 린트. 순수 함수, IO 없음. 참조 구현
-packages/cli       sil — init · lint · view
-packages/viewer    React Flow + dagre. vite 가 단일 HTML 로
-packages/vscode    확장 — Diagnostic · 그래프 웹뷰 · configurationDefaults
-tools/stress.mjs   부하 테스트용 코퍼스 생성기 — node tools/stress.mjs <out> [flows] [depth] [fanout]
+packages/core      parser · IR · lint rules · graph · writer. Pure functions, no IO except loadDir. The reference implementation
+packages/cli       sil — init · lint · view (local server, incremental parsing, gzip, whole-file edit API)
+packages/viewer    React Flow graph: flow map, subtree folding, WebGL + DOM virtualization, label layout, editing, ko/en. vite builds one HTML file
+packages/vscode    extension — Diagnostic · graph webview · configurationDefaults
+tools/stress.mjs   load-test corpus generator — node tools/stress.mjs <out> [flows] [depth] [fanout]
 ```
 
 ## License

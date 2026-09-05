@@ -1,35 +1,45 @@
 {
   "name": "silmari",
-  "version": "0.0.0",
-  "type": "module",
-  "bin": {
-    "sil": "./dist/sil.cjs"
-  },
-  "scripts": {
-    "build": "node build.mjs",
-    "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test test/*.test.ts"
-  },
-  "dependencies": {
-    "@silmari/core": "workspace:*"
-  },
-  "devDependencies": {
-    "@types/node": "^22",
-    "typescript": "^5.7",
-    "esbuild": "^0.28.2",
-    "@silmari/viewer": "workspace:*"
-  },
+  "version": "0.1.0",
   "description": "Checks the flow and data between md documents and shows them as a graph — sil lint · sil view",
+  "keywords": [
+    "markdown",
+    "agent",
+    "prompt",
+    "graph",
+    "lint",
+    "claude"
+  ],
   "license": "MIT",
+  "homepage": "https://github.com/mogiyoon/silmari#readme",
   "repository": {
     "type": "git",
     "url": "https://github.com/mogiyoon/silmari",
     "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/mogiyoon/silmari/issues"
+  },
+  "type": "module",
+  "bin": {
+    "sil": "./dist/sil.cjs"
   },
   "files": [
     "dist"
   ],
   "engines": {
     "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.7",
+    "esbuild": "^0.28.2",
+    "@silmari/viewer": "workspace:*",
+    "@silmari/core": "workspace:*"
   }
 }
