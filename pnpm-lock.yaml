@@ -9,11 +9,10 @@ importers:
   .: {}
 
   packages/cli:
-    dependencies:
+    devDependencies:
       '@silmari/core':
         specifier: workspace:*
         version: link:../core
-    devDependencies:
       '@silmari/viewer':
         specifier: workspace:*
         version: link:../viewer
