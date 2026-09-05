@@ -1,0 +1,149 @@
+* { box-sizing: border-box }
+html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0; font: 13px/1.6 -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif }
+.app { display: flex; height: 100%; overflow: hidden }
+.canvas { flex: 1; position: relative }
+.empty { display: grid; place-items: center; height: 100%; color: #94a3b8 }
+
+.nd { border-radius: 8px; color: #fff; padding: 8px 12px; border: 2px solid transparent; display: flex; flex-direction: column; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,.4) }
+/* Text is never cut off anywhere: titles and names wrap and the box grows */
+.nd .t { font-weight: 600; font-size: 13px; white-space: normal; word-break: break-word; line-height: 1.3 }
+.nd .id { font-size: 11px; opacity: .75; white-space: normal; word-break: break-word }
+.nd.doc, .nd.ghost { border-radius: 28px; text-align: center }
+.nd.ghost { border-style: dashed; border-color: #fca5a5; background: #7f1d1d !important }
+.nd.iso { border-color: #a78bfa; border-width: 3px }
+.nd.sel { border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.25) }
+.nd.hot { border-color: rgba(255,255,255,.75) } .sec.hot { border-color: rgba(255,255,255,.6) }
+.react-flow__handle { opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0 }
+
+.el { position: absolute; background: #0f172a; box-shadow: 0 0 0 3px #0f172a, 0 2px 8px rgba(0,0,0,.5); border: 1px solid #334155; border-radius: 6px; padding: 2px 7px; font-size: 10.5px; color: #cbd5e1; white-space: nowrap; text-align: center }
+
+
+
+.side { width: 430px; flex-shrink: 0; background: #1e293b; border-left: 1px solid #334155; padding: 16px; overflow-y: auto }
+.side h1 { font-size: 15px; margin: 0 0 4px }
+.side h2 { font-size: 11px; color: #94a3b8; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .5px }
+.sub { color: #94a3b8; font-size: 12px }
+.badge { display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 4px; margin-left: 6px; background: #475569; color: #fff; vertical-align: middle }
+.badge.live { background: #059669 } .badge.bad { background: #dc2626 } .badge.iso { background: #7c3aed }
+.f { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; user-select: none }
+.f:hover { background: #334155 } .f code { color: #64748b }
+.dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0 }
+.cnt { margin-left: auto; color: #64748b; font-size: 12px }
+.det { background: #0f172a; border-radius: 8px; padding: 12px; font-size: 12px; min-height: 60px }
+.det .t { font-weight: 600; font-size: 13px } .det .desc { color: #94a3b8; margin: 2px 0 8px }
+.muted { color: #64748b }
+.tree details { margin: 2px 0 } .tree summary { cursor: pointer; color: #cbd5e1 } .tree details details { margin-left: 14px }
+.ct { margin-top: 8px; color: #94a3b8 } .ct b { color: #e2e8f0; display: block }
+.er { padding-left: 4px } .er a { color: #93c5fd; cursor: pointer } .er a:hover { text-decoration: underline } .et { color: #64748b; font-size: 11px }
+.d { padding: 7px 9px; border-radius: 6px; margin-bottom: 5px; font-size: 12px; background: #0f172a; border-left: 3px solid; cursor: pointer }
+.d:hover { background: #172033 }
+.d.error { border-color: #dc2626 } .d.warning { border-color: #f59e0b } .d.info { border-color: #3b82f6 }
+.d code { color: #f1f5f9; font-size: 11px } .d .w { color: #94a3b8; font-size: 11px; display: block; margin-top: 2px }
+.tree .leaf { margin-left: 14px; font-size: 11px }
+.tree summary .muted { font-size: 11px }
+.tree .body { white-space: pre-wrap; font: 11px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: #cbd5e1; background: #172033; border-radius: 6px; padding: 8px 10px; margin: 4px 0 6px 14px; max-height: 260px; overflow: auto }
+.toast { position: absolute; left: 12px; bottom: 12px; z-index: 5; padding: 8px 12px; border-radius: 8px; font-size: 12px; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; max-width: 70%; }
+.toast.ok { border-color: #059669 } .toast.bad { border-color: #dc2626 }
+
+/* 펼친 노드 — 헤딩 상자가 안에 들어온다 */
+.nd { position: relative }
+.nd .hd { position: relative }
+.nd .bar { display: flex; justify-content: flex-end; gap: 4px; height: 18px; margin: -2px -6px 3px 0 }
+.nd .tg { width: 20px; height: 18px; border: 0; border-radius: 5px; background: rgba(255,255,255,.18); color: #fff; font-size: 11px; cursor: pointer; line-height: 18px; padding: 0 }
+.nd .tg:hover { background: rgba(255,255,255,.35) }
+.nd.open { background: #0f172a; justify-content: flex-start; padding: 8px 12px }
+.nd.open .hd .t { font-size: 14px }
+.nd.open .hd .id { opacity: .7 }
+.detailbtn { float: right; font: 11px -apple-system, "Apple SD Gothic Neo", sans-serif; background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 3px 9px; cursor: pointer }
+.detailbtn:hover { background: #1d4ed8 }
+.sec { position: relative; background: #1e293b; border: 2px solid #334155; border-radius: 8px; padding: 5px 10px; box-sizing: border-box; color: #e2e8f0; box-shadow: 0 2px 6px rgba(0,0,0,.35); cursor: pointer; overflow: hidden }
+.sec.l1 { border-color: #475569 } .sec.iso { border-color: #a78bfa } .sec.sel { border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.25) }
+.sec .t { font-weight: 600; font-size: 12px; line-height: 17px; word-break: break-word; display: flex; flex-wrap: wrap; align-items: center; gap: 5px }
+.sec .t .ln { font-weight: 400; font-size: 11px }
+.sec .t .badge, .sec .t .calls { margin: 0; line-height: 15px }
+.sec .calls { font-size: 10px; font-weight: 400; color: #cbd5e1; background: #334155; border-radius: 4px; padding: 0 6px }
+.sec .meta .badge { margin: 0 }
+.headfull { background: #172033; border: 1px solid #7c3aed; border-radius: 8px; padding: 8px 10px; margin: 6px 0 8px }
+.headfull .hh { font-weight: 600; margin-bottom: 6px }
+.tree .body.big, .headfull .body { max-height: 420px; margin: 0 }
+
+.nd.open .hd .t, .nd.open .hd .id { white-space: normal; overflow: visible; text-overflow: clip; word-break: break-word }
+.det, .det .t, .det .desc, .headfull .hh, .er, .tree summary, .d { overflow-wrap: anywhere; word-break: break-word }
+.det code, .d code, .er a { overflow-wrap: anywhere }
+.topbar { position: absolute; left: 12px; top: 10px; z-index: 5; display: flex; align-items: center; gap: 6px }
+.crumb { font-size: 11px; color: #cbd5e1; background: rgba(15,23,42,.7); padding: 3px 8px; border-radius: 6px }
+.resetbtn { font: 11px -apple-system, "Apple SD Gothic Neo", sans-serif; background: rgba(15,23,42,.8); color: #94a3b8; border: 1px solid #334155; border-radius: 6px; padding: 3px 8px; cursor: pointer }
+.resetbtn:hover { color: #e2e8f0 }
+.legend { position: absolute; left: 12px; bottom: 44px; z-index: 5; font-size: 11px; color: #cbd5e1; background: rgba(15,23,42,.85); border: 1px solid #334155; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px }
+.legend > div { display: flex; align-items: center; gap: 7px }
+.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px } .legend i.isoi { background: transparent; border: 2px solid #a78bfa; border-radius: 3px }
+.el .row { line-height: 18px; flex-wrap: wrap; gap: 4px }
+.el .row .tag { margin-right: 2px }
+.el .chip { display: inline-block; padding: 0 6px; border-radius: 4px; background: #1e293b; border: 1px solid #475569; color: #e2e8f0; font-size: 10.5px; line-height: 16px }
+.el .chip.send { border-color: #3b82f6 } .el .chip.ret { border-color: #d97706 }
+.el .row .badge { margin: 0 }
+/* 오른쪽 창의 프롬프트가 옆으로 길어지지 않게 — 긴 경로·코드도 꺾는다 */
+.side { overflow-x: hidden }
+.det { min-width: 0 }
+.tree .body, .headfull .body, .det pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; overflow-x: hidden }
+.desc-chain { margin-top: 14px; border-top: 1px solid #1e293b; padding-top: 6px }
+.desc-chain h2 { margin: 6px 0 8px }
+.desc-chain details.child { background: #0b1220; border: 1px solid #1e293b; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px }
+.desc-chain details.child > summary { cursor: pointer; font-weight: 600 } .desc-chain details.child > summary a { color: #93c5fd; cursor: pointer }
+.desc-chain .tree { margin-top: 4px }
+.meta-d { margin: 6px 0 10px; font-size: 12px } .meta-d > summary { cursor: pointer }
+.prompt-of { margin: 8px 0 4px; font-size: 12px; border-top: 1px solid #1e293b; padding-top: 8px }
+.desc-chain { margin-top: 6px; border-top: 0; padding-top: 0 }
+/* 라벨 층은 항상 선 위 — 선택된 노드의 간선이 올라와도 글자를 못 가린다 */
+.react-flow__edgelabel-renderer { z-index: 1001 !important }
+.react-flow__edges, .react-flow__edges svg { z-index: 0 !important }
+
+/* 간선 라벨 — 머리(조건 · 서브에이전트) / 몸(태그 + 칩) / 발(앵커) */
+.el { text-align: left; padding: 5px 8px }
+.el .lt { color: #94a3b8; font-size: 10px; line-height: 16px; white-space: normal; word-break: break-word; max-width: 260px; margin: 0 -2px 3px; padding-bottom: 2px; border-bottom: 1px solid #1e293b }
+.el .lh { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -1px -2px 4px; padding-bottom: 3px; border-bottom: 1px solid #334155 }
+.el .lhx { color: #c4b5fd; font-size: 10.5px; font-weight: 600; white-space: normal; word-break: break-word; max-width: 240px }
+.el .lh .badge { margin: 0 }
+/* One grid for all rows: the tag column is as wide as the widest tag ("→ receive" is longer than "→ 보냄"), so tags never run into the
+   chips and the chips of both rows line up */
+.el .lb { display: grid; grid-template-columns: max-content 1fr; column-gap: 6px; row-gap: 4px; align-items: center; margin: 2px 0 }
+.el .row { display: contents }
+.el .row .tag { width: auto; margin: 0; text-align: left; white-space: nowrap }
+.el .chips { display: flex; flex-wrap: wrap; gap: 4px }
+.el .la { padding: 2px 0 3px; font-size: 10.5px; font-weight: 600 } .el .la.anchor { color: #34d399 }
+.el .lh + .la { margin-top: -2px }
+.el .la + .lb, .el .lh + .lb { border-top: 1px solid #334155; padding-top: 3px; margin-top: 2px }
+.editbtn { font: 11px -apple-system, "Apple SD Gothic Neo", sans-serif; background: #2563eb; color: #fff; border: 0; border-radius: 5px; padding: 2px 8px; cursor: pointer } .editbtn:disabled { opacity: .4; cursor: default } .editbtn.ghost { background: #334155 }
+.bodyedit { width: 100%; box-sizing: border-box; font: 12px/1.55 ui-monospace, "SF Mono", Menlo, monospace; color: #e2e8f0; background: #0b1220; border: 1px solid #2563eb; border-radius: 6px; padding: 8px 10px; resize: vertical; margin: 4px 0 0 14px; max-width: calc(100% - 14px) }
+.editbar { display: flex; align-items: center; gap: 8px; margin: 4px 0 6px 14px; font-size: 11px } .editbar .muted { flex: 1 }
+.detailbtn.edit { background: #7c3aed; margin-right: 6px } .detailbtn.raw { background: #0f766e }
+.rawedit { width: 100%; box-sizing: border-box; font: 12px/1.55 ui-monospace, "SF Mono", Menlo, monospace; color: #e2e8f0; background: #0b1220; border: 1px solid #0f766e; border-radius: 6px; padding: 8px 10px; resize: vertical; margin-top: 8px }
+.nd .entrychip { margin-left: 6px; font-size: 9.5px; background: rgba(255,255,255,.22); border-radius: 4px; padding: 0 5px; vertical-align: middle }
+.rail { width: 36px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 8px; background: #0f172a; border-left: 1px solid #334155 }
+.railbtn { width: 26px; height: 26px; display: grid; place-items: center; font: 13px -apple-system, "Apple SD Gothic Neo", sans-serif; background: transparent; color: #94a3b8; border: 1px solid transparent; border-radius: 6px; cursor: pointer }
+.railbtn:hover { background: #1e293b; color: #e2e8f0 }
+.cellnode { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 10px 12px; color: #e2e8f0; cursor: pointer; box-sizing: border-box }
+.cellnode:hover { border-color: #64748b } .cellnode.entry { border-color: #3b82f6 }
+.cellnode .t { font-weight: 600; font-size: 13px; white-space: normal; word-break: break-word } .cellnode .s { font-size: 11px; color: #94a3b8; margin-top: 3px }
+.f.on { background: #334155 }
+.glwrap { position: absolute; inset: 0; overflow: hidden; touch-action: none; background: #0b111c; cursor: grab }
+.glwrap canvas.gl { position: absolute; inset: 0; width: 100%; height: 100% } .glwrap .gltext { pointer-events: none }
+/* As a layer inside React Flow: above the background, below the pane and nodes, no input */
+.glwrap.layer { pointer-events: none; z-index: 0; background: transparent; cursor: default }
+/* Far view: the DOM window stays mounted and measured but out of sight. The layer draws instead.
+   opacity, not visibility: React Flow writes an inline visibility on every measured node, which would win over a rule here */
+.domhide .react-flow__nodes, .domhide .react-flow__edges, .domhide .react-flow__edgelabel-renderer { opacity: 0 }
+.domhide .react-flow__node, .domhide .react-flow__edge { pointer-events: none !important } /* the inline pointer-events React Flow writes per node */
+.railbtn.on { color: #e2e8f0; border-color: #334155; background: #1e293b }
+.railbtn.lang { width: auto; min-width: 26px; padding: 0 4px; white-space: nowrap; font-size: 10px; font-weight: 600; letter-spacing: .3px }
+.toast.warn { border-color: #f59e0b } .toast { white-space: pre-wrap; max-width: 60% }
+.detailbtn.save { background: #059669; margin-right: 6px } .detailbtn.ghost { background: #334155; margin-right: 6px }
+.bodyedit.dirty { border-color: #f59e0b }
+.more { text-align: center; padding: 8px; font-size: 12px }
+/* subtree fold buttons: same shape as the ▾ button, in the same row */
+.nd .tg.fold { letter-spacing: -2px; padding-right: 2px }
+/* right panel sections fold under their heading */
+.side h2.sech { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px }
+.side h2.sech .tri { width: 10px; color: #64748b }
+.side h2.sech .cnt { margin-left: auto; text-transform: none; letter-spacing: 0; max-width: 60%; text-align: right; white-space: normal; word-break: break-word }
+.side h2.sech:hover { color: #cbd5e1 }
