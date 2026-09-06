@@ -13,7 +13,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { Graph, Node as SilNode, Edge as SilEdge, NodeKind, Diagnostic } from '@silmari/core'
-import { useGraph } from './data.ts'
+import { useGraph, type Phase } from './data.ts'
 import { DICTS, LangCtx, initialLang, saveLang, useLang, type Lang } from './i18n.ts'
 import { GLCanvas, glHit, type GLEdge, type GLNode } from './gl.tsx'
 import { type Cell, type LabelOrder, cells, layout, skeleton, nodeSize, secPos, secHeight, SEC_W, SIZE, edgeLabelRows } from './layout.ts'
@@ -214,9 +214,26 @@ export function App() {
 /** Heading that contains the edge's line. It is the last heading before that line */
 const secOf = (n: SilNode, line: number): Hd | null => { let s: Hd | null = null; for (const h of n.headings) if (h.line <= line) s = h; return s }
 
+/** Shown until the first graph arrives: a spinner, the phase, and the seconds elapsed (a big corpus takes several seconds to parse) */
+function Loading({ phase, error }: { phase: Phase; error: string | null }) {
+  const { t } = useLang()
+  const [sec, setSec] = useState(0)
+  useEffect(() => { const t0 = Date.now(); const id = setInterval(() => setSec(Math.floor((Date.now() - t0) / 1000)), 1000); return () => clearInterval(id) }, [])
+  if (error) return <div className="empty"><div className="load"><span className="err">✖</span><span>{t.irError(error)}</span></div></div>
+  return (
+    <div className="empty">
+      <div className="load" role="status" aria-live="polite">
+        <span className="spin" />
+        <span>{t.loading[phase]}</span>
+        {sec > 0 && <span className="muted">{t.elapsed(sec)}</span>}
+      </div>
+    </div>
+  )
+}
+
 function Inner() {
   const { t, lang, setLang } = useLang()
-  const { graph, live, error, mode, root } = useGraph()
+  const { graph, live, error, mode, root, phase } = useGraph()
   const [off, setOff] = useState<Set<NodeKind>>(new Set())
   const [sel, setSel] = useState<string | null>(null)
   const [selHead, setSelHead] = useState<{ doc: string; line: number } | null>(null)
@@ -544,7 +561,7 @@ function Inner() {
               data: { sil: e, k, hot, dim, ghost: byId.get(e.to)?.kind === 'ghost', label: placed.labels.get(i), off: saved.labels[edgeKey(e)] ?? { dx: 0, dy: 0 }, onDrag: onLabelDrag, idx: i, onMeasure } }]
   })
 
-  if (!graph) return <div className="empty">{error ? t.irError(error) : t.irWaiting}</div>
+  if (!graph) return <Loading phase={phase} error={error} />
 
   return (
     <div className="app">
