@@ -1,7 +1,11 @@
 // sil init. Creates .sil/config.yaml and SILMARI.md (entry point and notation summary). Makes agent start files refer to SILMARI.md. Design §2.4 · §7.7.
 // Agent start files (CLAUDE.md · AGENTS.md · GEMINI.md · copilot-instructions.md): create missing files without favoring a tool. Append to existing files.
 //  ① One line that says to follow SILMARI.md and read it before working. The same line for every tool; no tool-specific import syntax
-//  ② If md files already exist, add one line asking whether to start the silmari migration when work begins.
+//  ② If md files already exist, add one line asking whether to start the silmari migration when work begins. The line points at the
+//     "Migration" section of SILMARI.md: the notation summary alone tells the model what the symbols are, not how to move an
+//     orchestrator with inline agent sections, mermaid and pseudocode into them. Given only "migrate to the notation", the model added
+//     three contract headings and one {{ }} to a 400-line orchestrator and stopped (2026-09-06). The section lists the rules that the
+//     hand migration in notes/examples/mogiyoon/README.md settled on, and ends with "run sil lint until error 0".
 // Models do not know our notation. The rules must be where models read them. SILMARI.md alone scored 0/3; a plain 'read SILMARI.md before working' line in CLAUDE.md scored 4/4 (experiment 5).
 import { resolve, dirname } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
@@ -41,11 +45,63 @@ This document is the entry point. The graph starts here, and the documents calle
 ## Flow
 
 Link the flow documents here. Example: \`[Feature work](flow.md)\`
+
+## Migration
+
+Moving an existing document to the notation means putting the flow where the parser can read it. Adding a few headings or one \`{{ }}\` is not a migration. Follow these rules for every document that calls other agents.
+
+1. **One agent, one file.** An agent defined as a section inside an orchestrator (\`### 1. Analyst — role, tools, model …\`) becomes its own md file. Tools and model go in that file's frontmatter. The orchestrator keeps only the call.
+2. **The contract lives in the called file.** Turn its input/output bullets into \`## Inputs\` / \`## Steps\` / \`## Outputs\` lists there, one name per item. Do not add these headings to the caller.
+3. **One call, one line.** Each step of the orchestrator is a numbered heading with a link to the called file and the values on that line: \`[Analyst](agents/analyst.md) with {{>posting}} and receive {{<analysis}}\`. A loop or retry is a heading that states its condition and its bound (\`## 5. If validation fails (up to 2 times)\`) with the call below it. Parallel work is a heading that says "for each".
+4. **Diagrams, pseudocode and transfer tables stay, but do not count.** The parser cannot read mermaid, a while loop, or a "data passed between agents" table. Copy what they say onto the call lines; leave the originals for people.
+5. **Value names are one word.** Letters, digits, \`_\`, \`-\`. No spaces, no symbols: \`{{>slug}}\`, not \`{{>company slug}}\`. Use the same name at the sender, the receiver, and in the contract.
+6. **Values attach only to calls.** A link to a rules or reference document carries no \`{{ }}\`.
+7. **Prose stays prose.** Background, rationale, error handling, examples: leave them as they are. The notation appears only on lines with calls.
+8. **Your language.** Write the contract headings in the user's language and add those words under \`words\` in \`.sil/config.yaml\`, or the parser will not see them.
+9. **Finish with \`sil lint\`.** Repeat until it reports error 0. Warnings that remain should be real mismatches, not notation mistakes.
+
+Before, one file:
+
+\`\`\`markdown
+## Agents
+### 1. Analyst — tools: Read, Write · model: sonnet
+Input: the posting. Output: analysis.json
+### 2. Composer — …
+## Flow (mermaid)
+Analyst --> Composer --> Evaluator; score < 85 --> Composer (max 3)
+\`\`\`
+
+After, the orchestrator:
+
+\`\`\`markdown
+## 1. Analyse ((use a subagent))
+Call [Analyst](agents/analyst.md) with {{>posting}} and receive {{<analysis}}.
+## 2. Compose ((use a subagent))
+Call [Composer](agents/composer.md) with {{>analysis}} and receive {{<preset}}.
+## 3. If the score is under 85 (up to 3 times) ((use a subagent))
+Call [Composer](agents/composer.md) with {{>fixes}} and {{>preset}} and receive {{<preset}} again.
+\`\`\`
+
+And \`agents/analyst.md\`:
+
+\`\`\`markdown
+---
+tools: Read, Write
+model: sonnet
+---
+# Analyst
+## Inputs
+- posting
+## Steps
+1. …
+## Outputs
+- analysis
+\`\`\`
 `
 // One plain sentence for every tool. Import syntax such as @SILMARI.md is Claude-specific; the plain line made Claude read the file 4/4 (experiment 5)
 const CALL = `${ENTRY_MAIN} is the entry point of everything in this project. The notation and flow of every md document follow ${ENTRY_MAIN}. Read ${ENTRY_MAIN} first, before any work.`
 const LANG_LINE = (lang: string) => `The user's language is "${lang}". Write documents and answers in that language. Keep the notation from ${ENTRY_MAIN} as it is.`
-const MIGRATE = `When starting work, if this project's md files do not yet follow the ${ENTRY_MAIN} notation, first ask: "Start the silmari migration?" If yes, migrate the md files to the ${ENTRY_MAIN} notation.`
+const MIGRATE = `When starting work, if this project's md files do not yet follow the ${ENTRY_MAIN} notation, first ask: "Start the silmari migration?" If yes, follow the "Migration" section of ${ENTRY_MAIN} rule by rule, and finish with \`sil lint\` at error 0.`
 const AGENT_HEAD = (f: string) => `# ${f.replace(/^.*\//, '').replace(/\.md$/, '')}`
 
 /** Agent start files. Tools read them automatically each session. */

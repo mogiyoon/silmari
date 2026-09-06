@@ -33,7 +33,7 @@ sil lint                # read every md file, print what is wrong
 sil view                # open the graph in the browser; it redraws when a file changes
 ```
 
-`sil init` records your language (`--lang=ko`, else the locale) so agents write SILMARI.md and their replies in it. If the folder already has md files it also asks the agent, on its next start, whether to migrate them to the notation. Nothing is rewritten by silmari itself.
+`sil init` records your language (`--lang=ko`, else the locale) so agents write SILMARI.md and their replies in it. Nothing is rewritten by silmari itself.
 
 What `sil lint` prints on the [demo corpus](packages/core/test/fixtures/after):
 
@@ -45,6 +45,25 @@ error 2 · warning 0 · info 0
 ```
 
 `--strict` makes it exit with code 1 on any error, for CI. `--json` prints the whole graph and diagnostics. Options take `--key=value` or `--key value`.
+
+## Migrating existing documents
+
+If the folder already has md files, `sil init` adds one more line to the agent start files. On its next start the agent asks:
+
+```
+Start the silmari migration?
+```
+
+Say yes and the agent moves the documents to the notation, following the *Migration* section of `SILMARI.md` rule by rule:
+
+- **One agent, one file.** An agent that was a section inside an orchestrator (`### 1. Analyst — tools · model …`) becomes its own md file; tools and model go in its frontmatter.
+- **The contract lives in the called file.** Its input/output bullets become `## Inputs` / `## Steps` / `## Outputs` lists there, not in the caller.
+- **One call, one line.** Each step of the orchestrator is a heading with a link and its values: `[Analyst](agents/analyst.md) with {{>posting}} and receive {{<analysis}}`. A retry is a heading that states the condition and the bound.
+- **Diagrams, pseudocode and transfer tables stay for people.** The parser cannot read them; what they say is copied onto the call lines.
+- **Prose stays prose.** Rationale, error handling and examples are left as they are. The notation appears only on lines with calls.
+- **It ends with `sil lint` at error 0.**
+
+silmari does not touch the files. The agent moves the text; `sil lint` checks the result. To run it again later, tell the agent "start the migration" in a session; the line in CLAUDE.md stays. What a flow and its called documents look like after the move is the [demo corpus](packages/core/test/fixtures/after).
 
 ## Notation: four things to learn
 
