@@ -65,8 +65,8 @@
           "subagent": true,
           "body": "For each target file, call [research](research.md) with {{>target}} and receive {{<findings}}.",
           "range": {
-            "start": 178,
-            "end": 272
+            "start": 180,
+            "end": 274
           }
         },
         {
@@ -76,8 +76,8 @@
           "subagent": false,
           "body": "Call [plan](plan.md) with {{>findings}} and receive {{<plan}}.",
           "range": {
-            "start": 286,
-            "end": 348
+            "start": 288,
+            "end": 350
           }
         },
         {
@@ -87,8 +87,8 @@
           "subagent": false,
           "body": "Call [implement](implement.md) with {{>plan}} and receive {{<changed-files}}.",
           "range": {
-            "start": 367,
-            "end": 444
+            "start": 369,
+            "end": 446
           }
         },
         {
@@ -98,8 +98,8 @@
           "subagent": true,
           "body": "Call [review](review.md) with {{>changed-files}} and receive {{<comments}}.",
           "range": {
-            "start": 477,
-            "end": 552
+            "start": 481,
+            "end": 556
           }
         },
         {
@@ -109,8 +109,8 @@
           "subagent": false,
           "body": "Call [implement](implement.md) with {{>comments}} and receive {{<changed-files}} again. Repeat until there are no comments.",
           "range": {
-            "start": 583,
-            "end": 706
+            "start": 587,
+            "end": 710
           }
         },
         {
@@ -120,13 +120,13 @@
           "subagent": false,
           "body": "Run [wrap-up](wrap-up.md).",
           "range": {
-            "start": 723,
-            "end": 749
+            "start": 727,
+            "end": 753
           }
         }
       ],
       "contract": null,
-      "hash": "93e2b12eac1ba0564b8896d6dbe4bfc784e95169"
+      "hash": "305513bf244280cba323122225f928c979db1522"
     },
     {
       "id": "implement.md",
@@ -510,8 +510,8 @@
       ],
       "isolated": true,
       "range": {
-        "start": 205,
-        "end": 228
+        "start": 207,
+        "end": 230
       }
     },
     {
@@ -531,8 +531,8 @@
       ],
       "isolated": false,
       "range": {
-        "start": 291,
-        "end": 306
+        "start": 293,
+        "end": 308
       }
     },
     {
@@ -552,8 +552,8 @@
       ],
       "isolated": false,
       "range": {
-        "start": 372,
-        "end": 397
+        "start": 374,
+        "end": 399
       }
     },
     {
@@ -573,8 +573,8 @@
       ],
       "isolated": true,
       "range": {
-        "start": 482,
-        "end": 501
+        "start": 486,
+        "end": 505
       }
     },
     {
@@ -594,8 +594,8 @@
       ],
       "isolated": false,
       "range": {
-        "start": 588,
-        "end": 613
+        "start": 592,
+        "end": 617
       }
     },
     {
@@ -611,8 +611,8 @@
       "returns": [],
       "isolated": false,
       "range": {
-        "start": 727,
-        "end": 748
+        "start": 731,
+        "end": 752
       }
     },
     {

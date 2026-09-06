@@ -10,7 +10,7 @@ rmSync(out, { recursive: true, force: true }); mkdirSync(join(out, '.sil'), { re
 writeFileSync(join(out, '.sil/config.yaml'), 'entry: [flow-1.md]\nwords:\n  inputs: [inputs, input]\n  outputs: [outputs, output]\n  task: [steps, procedure]\n')
 let files = 0
 const write = (name, text) => { writeFileSync(join(out, `${name}.md`), text); files++ }
-const calls = (kids) => kids.map((c, k) => `## ${k + 1}. ${c}${k % 2 ? ' [use a subagent]' : ''}\n\n[${c}](${c}.md) receives {{>in${c}}} and returns {{<out${c}}}.\n`).join('\n')
+const calls = (kids) => kids.map((c, k) => `## ${k + 1}. ${c}${k % 2 ? ' ((use a subagent))' : ''}\n\n[${c}](${c}.md) receives {{>in${c}}} and returns {{<out${c}}}.\n`).join('\n')
 /** Writes node `name` at `level` and its whole subtree. A node calls fanout children until the last level, which are leaves. */
 const node = (name, level, f) => {
   const kids = level < depth ? Array.from({ length: fanout }, (_, j) => `${name}-${j + 1}`) : []
