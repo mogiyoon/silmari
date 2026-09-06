@@ -21,10 +21,10 @@ Flows (documents that link to each other) start as an overview map. Open one and
 
 ## Notation
 
-A standard Markdown link is a call. Add values after the link: `{{>send}}` and `{{<receive}}`. A heading is a condition. A bracket label at the end of a heading, such as `[use a subagent]`, isolates the calls in that section. An md file without notation is not an error; adopt it one file at a time.
+A standard Markdown link is a call. Add values after the link: `{{>send}}` and `{{<receive}}`. A heading is a condition. A double-parenthesis label at the end of a heading, such as `((use a subagent))`, isolates the calls in that section. An md file without notation is not an error; adopt it one file at a time.
 
 ```markdown
-## 1. Research [use a subagent]
+## 1. Research ((use a subagent))
 For each target file, call [research](research.md) with {{>target}} and receive {{<findings}}.
 ```
 
