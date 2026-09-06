@@ -2,6 +2,7 @@
 // sil. Design §7.7. init · lint · view.
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { isMainThread } from 'node:worker_threads'
 import { findProjectRoot } from '@silmari/core'
 import { lint } from './lint.ts'
 import { init } from './init.ts'
@@ -56,11 +57,13 @@ Docs: https://github.com/mogiyoon/silmari
 `
 
 // process.exit() cuts off piped stdout. Use exitCode.
-if (flags.has('version') || cmd === 'version') { process.stdout.write(`${version()}\n`) }
+// Parse workers run this same file (core's loadDirAsync spawns it as a worker thread); in that case the CLI must not run
+if (!isMainThread) { /* worker: core handles it at import time */ }
+else if (flags.has('version') || cmd === 'version') { process.stdout.write(`${version()}\n`) }
 else if (flags.has('help') || cmd === 'help') { process.stdout.write(usage) }
 else switch (cmd) {
   case 'init': process.exitCode = init(args[0] ?? '.', { entry: opt('entry'), lang: opt('lang') }); break
-  case 'lint': process.exitCode = lint(project(), { strict: flags.has('strict'), json: flags.has('json') }); break
-  case 'view': process.exitCode = view(project(), { port: opt('port') ? Number(opt('port')) : undefined, out: opt('out'), open: !flags.has('no-open') }); break
+  case 'lint': lint(project(), { strict: flags.has('strict'), json: flags.has('json') }).then((c) => { process.exitCode = c }); break
+  case 'view': view(project(), { port: opt('port') ? Number(opt('port')) : undefined, out: opt('out'), open: !flags.has('no-open') }).then((c) => { process.exitCode = c }); break
   default: process.stdout.write(usage); process.exitCode = cmd ? 2 : 0
 }

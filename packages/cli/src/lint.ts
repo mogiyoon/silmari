@@ -1,7 +1,7 @@
 // sil lint. Interface 1. Design §4.1 · §4.2.
 import { resolve } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
-import { loadDir, existsIn, buildGraph, readConfig, type Diagnostic, type Severity } from '@silmari/core'
+import { loadDirAsync, existsIn, buildGraph, readConfig, type Diagnostic, type Severity } from '@silmari/core'
 export { readConfig }
 
 
@@ -17,11 +17,11 @@ export function format(diags: Diagnostic[]): string {
   return lines.join('\n') + '\n'
 }
 
-export function lint(dir: string, opt: { strict?: boolean; json?: boolean } = {}): number {
+export async function lint(dir: string, opt: { strict?: boolean; json?: boolean } = {}): Promise<number> {
   const root = resolve(dir)
   const cfg = readConfig(root)
   const strict = opt.strict ?? cfg.strict
-  const graph = buildGraph(loadDir(root, cfg.scan.exclude, cfg.words), { exists: existsIn(root), entry: cfg.entry })
+  const graph = buildGraph(await loadDirAsync(root, cfg.scan.exclude, cfg.words), { exists: existsIn(root), entry: cfg.entry })
   if (opt.json) process.stdout.write(JSON.stringify(graph, null, 2) + '\n')
   else process.stdout.write(graph.diagnostics.length ? format(graph.diagnostics) : `No problems — ${graph.stats.files} files, ${graph.stats.nodes} nodes, ${graph.stats.edges} edges\n`)
   const errors = graph.diagnostics.some((d) => d.severity === 'error')

@@ -10,4 +10,5 @@ copyFileSync(viewer, 'dist/viewer.html')
 await build({
   entryPoints: ['src/extension.ts'], bundle: true, platform: 'node', format: 'cjs', target: 'node20',
   external: ['vscode'], outfile: 'dist/extension.cjs', sourcemap: true, logLevel: 'info',
+  logOverride: { 'empty-import-meta': 'silent' }, // core's load.ts checks typeof __filename first (the worker file for loadDirAsync)
 })

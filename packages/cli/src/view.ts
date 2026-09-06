@@ -7,7 +7,7 @@ import { gzipSync } from 'node:zlib'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolve, join } from 'node:path'
 import { spawn } from 'node:child_process'
-import { loadDir, existsIn, buildGraph, docCache, replaceBody, replaceBodies, writeRange, WriteError } from '@silmari/core'
+import { loadDirAsync, existsIn, buildGraph, docCache, replaceBody, replaceBodies, writeRange, WriteError } from '@silmari/core'
 import { readConfig } from './lint.ts'
 
 // Look for viewer.html next to the bundle (dist/sil.cjs) first. Otherwise use the workspace build.
@@ -43,21 +43,22 @@ function openBrowser(url: string) {
 }
 
 /** The graph the server hands out. Rebuilt only when an md file changed: the file watcher marks the folder dirty, then one incremental
- *  load re-parses just the changed files (unchanged ones come from the cache) and the graph is assembled again (fast) */
+ *  load re-parses just the changed files (unchanged ones come from the cache) and the graph is assembled again (fast).
+ *  The first load of a big corpus parses in worker threads (loadDirAsync); /graph requests that arrive meanwhile wait for that one build */
 const cache: { json: string; gz: Buffer; etag: string } = { json: '', gz: Buffer.alloc(0), etag: '' }
 
-export function view(dir: string, opt: { port?: number; out?: string; open?: boolean } = {}): number {
+export async function view(dir: string, opt: { port?: number; out?: string; open?: boolean } = {}): Promise<number> {
   const root = resolve(dir)
   const cfg = readConfig(root)
   const html = viewerHtml()
   if (!html) { process.stderr.write('The viewer is not built: pnpm --filter @silmari/viewer build\n'); return 2 }
   const docs = docCache()
-  const build = () => buildGraph(loadDir(root, cfg.scan.exclude, cfg.words, docs), { exists: existsIn(root), entry: cfg.entry })
+  const build = async () => buildGraph(await loadDirAsync(root, cfg.scan.exclude, cfg.words, docs), { exists: existsIn(root), entry: cfg.entry })
 
   if (opt.out) {
     const out = resolve(opt.out)
     const lay = resolve(root, '.sil/layout.json')
-    writeFileSync(out, embed(html, build(), root, existsSync(lay) ? readFileSync(lay, 'utf8') : null))
+    writeFileSync(out, embed(html, await build(), root, existsSync(lay) ? readFileSync(lay, 'utf8') : null))
     process.stdout.write(`Wrote: ${out}\n`)
     return 0
   }
@@ -68,11 +69,15 @@ export function view(dir: string, opt: { port?: number; out?: string; open?: boo
   let dirty = true, lastScan = 0
   const skip = /(^|\/)(\.git|\.sil|node_modules)(\/|$)/
   try { watch(root, { recursive: true }, (_ev, name) => { if (!name || !skip.test(String(name))) dirty = true }) } catch { /* no recursive watch here: the 30 s fallback covers it */ }
-  const refresh = () => {
-    if (!dirty && Date.now() - lastScan < 30_000) return
+  let building: Promise<void> | null = null
+  const refresh = (): Promise<void> => {
+    if (building) return building
+    if (!dirty && Date.now() - lastScan < 30_000) return Promise.resolve()
     dirty = false; lastScan = Date.now()
-    const g = build()
-    if (docs.changed || !cache.json) { cache.json = JSON.stringify(g); cache.gz = gzipSync(cache.json, { level: 1 }); cache.etag = `"${createHash('sha1').update(cache.json).digest('hex')}"` }
+    building = build().then((g) => {
+      if (docs.changed || !cache.json) { cache.json = JSON.stringify(g); cache.gz = gzipSync(cache.json, { level: 1 }); cache.etag = `"${createHash('sha1').update(cache.json).digest('hex')}"` }
+    }).finally(() => { building = null })
+    return building
   }
 
   const port = opt.port ?? 4141
@@ -159,9 +164,10 @@ export function view(dir: string, opt: { port?: number; out?: string; open?: boo
     } else if (url.pathname === '/graph') {
       // Rebuild only when the watcher saw a change (or every 30 s), and let the viewer skip unchanged bodies with an ETag.
       // On big corpora (tens of thousands of files) the JSON is tens of MB, so it goes out gzipped and polling every 2 s stays cheap
-      refresh()
-      if (req.headers['if-none-match'] === cache.etag) { res.writeHead(304, { etag: cache.etag, 'x-sil-root': encodeURIComponent(root) }); res.end(); return }
-      sendJson(req, res, 200, cache.json, { 'cache-control': 'no-store', etag: cache.etag, 'x-sil-root': encodeURIComponent(root) }, { raw: cache.json, gz: cache.gz })
+      refresh().then(() => {
+        if (req.headers['if-none-match'] === cache.etag) { res.writeHead(304, { etag: cache.etag, 'x-sil-root': encodeURIComponent(root) }); res.end(); return }
+        sendJson(req, res, 200, cache.json, { 'cache-control': 'no-store', etag: cache.etag, 'x-sil-root': encodeURIComponent(root) }, { raw: cache.json, gz: cache.gz })
+      }, (e: Error) => { res.writeHead(500, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })) })
     } else if (url.pathname === '/') {
       // The page carries only the root and saved layout; the graph comes from /graph right after load
       const lay = resolve(root, '.sil/layout.json')
