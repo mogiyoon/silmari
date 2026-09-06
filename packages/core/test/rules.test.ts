@@ -1,7 +1,10 @@
 // Rule unit tests. Cases absent from the corpus are given as strings. Appendix A.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseDoc, buildGraph, parseConfig } from '../src/index.ts'
+import { parseDoc, buildGraph, parseConfig, findProjectRoot } from '../src/index.ts'
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const codes = (docs: Record<string, string>) =>
   buildGraph(new Map(Object.entries(docs).map(([rel, src]) => [rel, parseDoc(rel, src)]))).diagnostics.map((d) => d.code)
@@ -10,6 +13,27 @@ const diagsOf = (docs: Record<string, string>) =>
   buildGraph(new Map(Object.entries(docs).map(([rel, src]) => [rel, parseDoc(rel, src)]))).diagnostics
 
 const TASK = '\n\n## Steps\n\n일.\n' // This heading makes it a task node.
+
+test('links resolve like imports: relative to the document, or from the project root with a leading /', () => {
+  const g = buildGraph(new Map([
+    ['flows/a.md', parseDoc('flows/a.md', '# A\n\n## Steps\n\nCall [b](../agents/b.md) with {{>x}}. Then [c](/agents/c.md) with {{>x}}. Then [d](./d.md).\n')],
+    ['agents/b.md', parseDoc('agents/b.md', '# B\n\n## Inputs\n- x\n')],
+    ['agents/c.md', parseDoc('agents/c.md', '# C\n\n## Inputs\n- x\n')],
+    ['flows/d.md', parseDoc('flows/d.md', '# D\n\n## Steps\n\nnothing\n')],
+  ]))
+  assert.deepEqual(g.edges.map((e) => e.to).sort(), ['agents/b.md', 'agents/c.md', 'flows/d.md'])
+  assert.ok(!g.diagnostics.some((d) => d.code === 'L-N01'), 'the root-relative link is found')
+})
+
+test('findProjectRoot: the nearest ancestor with .sil/, bounded by stop', () => {
+  const d = mkdtempSync(join(tmpdir(), 'sil-root-'))
+  mkdirSync(join(d, 'proj', '.sil'), { recursive: true }); mkdirSync(join(d, 'proj', 'a', 'b'), { recursive: true }); mkdirSync(join(d, 'other'), { recursive: true })
+  assert.equal(findProjectRoot(join(d, 'proj', 'a', 'b')), join(d, 'proj'))
+  assert.equal(findProjectRoot(join(d, 'proj')), join(d, 'proj'))
+  assert.equal(findProjectRoot(join(d, 'proj', 'a'), join(d, 'proj', 'a')), null, 'stop below the .sil folder: not found')
+  assert.equal(findProjectRoot(join(d, 'other'), d), null)
+  rmSync(d, { recursive: true, force: true })
+})
 
 test('L-N05: a link in a heading is not an edge, for task nodes only', () => {
   assert.ok(codes({ 'a.md': '# A\n\n## [b](b.md) 를 보라' + TASK, 'b.md': '# B\n\n자료.\n' }).includes('L-N05'))
@@ -175,6 +199,18 @@ test('L-I04: @ in a heading label is info; legacy notation still enables isolati
   assert.ok(g.edges.some((e) => e.to === 'b.md' && e.isolated))
   const g2 = buildGraph(new Map([['a.md', parseDoc('a.md', '# A\n\n## 1. 일 [서브 에이전트]\n\n[b](b.md) 에 {{>x}} 를 넘긴다.\n')], ['b.md', parseDoc('b.md', '# B' + TASK)]]))
   assert.ok(!g2.diagnostics.some((d) => d.code === 'L-I04') && g2.edges.some((e) => e.to === 'b.md' && e.isolated))
+})
+
+test('Isolation label: ((…)) at the heading end; the old [ ] form still isolates but reports L-I05', () => {
+  const iso = (h: string) => parseDoc('a.md', `# A\n\n${h}\n\n[b](b.md)\n`).headings.find((x) => x.level === 2)!.subagent
+  assert.ok(iso('## 1. Research ((use a subagent))'))
+  assert.ok(iso('## 1. 조사 ((서브 에이전트 사용))  '))
+  assert.ok(!iso('## 1. Review (at most 2 times)'), 'single parentheses are ordinary text')
+  assert.ok(!iso('## ((use a subagent)) list'), 'only at the end')
+  const old = parseDoc('a.md', '# A\n\n## 1. 일 [서브 에이전트 사용]\n\n[b](b.md)\n')
+  assert.ok(old.headings.find((x) => x.level === 2)!.subagent, 'legacy brackets still isolate')
+  assert.ok(old.diags.some((d) => d.code === 'L-I05' && d.message.includes('((서브 에이전트 사용))')), 'and suggest the new form')
+  assert.ok(!parseDoc('a.md', '# A\n\n## 1. Research ((use a subagent))\n\n[b](b.md)\n').diags.some((d) => d.code === 'L-I05'))
 })
 
 test('Isolation labels work only at heading ends; [subagent] inside a title is not a label', () => {

@@ -1,13 +1,26 @@
 // Reads documents from a directory. This is the only I/O in core. Move it to an io package if one is added.
 // Follows .gitignore. This was added after self-use included the entire Unity Library and .claude/worktrees directories.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative, sep } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
 import ignore from 'ignore'
 import { parseDoc, type Doc } from './parse.ts'
 import type { Words } from './config.ts'
 
 /** Always excluded. The config cannot include these paths. They are not documents for the graph. */
 export const ALWAYS_EXCLUDE = ['.git', 'node_modules', '.sil', '.claude/worktrees']
+
+/** The silmari project a path belongs to: the nearest directory, from `start` upwards, that has a `.sil/` folder. `stop` bounds the walk
+ *  (the editor's workspace folder, say); the walk never leaves it. Null when no ancestor has `.sil/`, so callers fall back to their default */
+export function findProjectRoot(start: string, stop?: string): string | null {
+  let dir = start
+  for (;;) {
+    if (existsSync(join(dir, '.sil'))) return dir
+    if (stop !== undefined && dir === stop) return null
+    const up = dirname(dir)
+    if (up === dir) return null
+    dir = up
+  }
+}
 
 /** Used with loadDir. Checks whether files outside the scan exist for buildGraph(docs, { exists }). */
 export const existsIn = (root: string) => (rel: string) => existsSync(join(root, rel))

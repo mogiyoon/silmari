@@ -1,7 +1,8 @@
 // silmari VS Code extension. S11 (configurationDefaults is in package.json) + S12 (Diagnostic) + graph webview.
 import * as vscode from 'vscode'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
-import { join, relative, sep } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
+import { findProjectRoot } from '@silmari/core'
 import { graphWithOverride, byFile, toLineCol, yieldToVscode } from './diagnose.ts'
 
 const EXCLUDE = ['node_modules', '.sil', '.git']
@@ -13,10 +14,15 @@ const SEV = { error: vscode.DiagnosticSeverity.Error, warning: vscode.Diagnostic
 
 function readText(p: string): string | null { try { return readFileSync(p, 'utf8') } catch { return null } }
 
-function rootOf(doc?: vscode.TextDocument): vscode.WorkspaceFolder | undefined {
-  return (doc && vscode.workspace.getWorkspaceFolder(doc.uri)) ?? vscode.workspace.workspaceFolders?.[0]
+/** The project the file belongs to: the nearest folder above it with `.sil/`, never above the workspace folder. Without one, the
+ *  workspace folder itself. So a silmari project inside a bigger repository (even one the repository's .gitignore hides) is scanned as its own */
+function rootOf(doc?: vscode.TextDocument): string | undefined {
+  const ws = (doc && vscode.workspace.getWorkspaceFolder(doc.uri)) ?? vscode.workspace.workspaceFolders?.[0]
+  if (!ws) return undefined
+  const from = doc && doc.uri.scheme === 'file' ? dirname(doc.uri.fsPath) : ws.uri.fsPath
+  return findProjectRoot(from, ws.uri.fsPath) ?? ws.uri.fsPath
 }
-const rel = (root: vscode.WorkspaceFolder, uri: vscode.Uri) => relative(root.uri.fsPath, uri.fsPath).split(sep).join('/')
+const rel = (root: string, uri: vscode.Uri) => relative(root, uri.fsPath).split(sep).join('/')
 
 function refresh(active?: vscode.TextDocument) {
   const root = rootOf(active)
@@ -24,7 +30,7 @@ function refresh(active?: vscode.TextDocument) {
   const override = active && active.languageId === 'markdown' && !active.uri.fsPath.includes(`${sep}node_modules${sep}`)
     ? { rel: rel(root, active.uri), text: active.getText() } : undefined
   let graph
-  try { graph = graphWithOverride(root.uri.fsPath, EXCLUDE, override) }
+  try { graph = graphWithOverride(root, EXCLUDE, override) }
   catch (e) { console.error('silmari', e); return }
 
   // When built-in VS Code link validation is active through configurationDefaults, let it handle missing files and anchors in open files.
@@ -35,7 +41,7 @@ function refresh(active?: vscode.TextDocument) {
 
   collection.clear()
   for (const [file, ds] of byFile(graph)) {
-    const fsPath = join(root.uri.fsPath, file)
+    const fsPath = join(root, file)
     const uri = vscode.Uri.file(fsPath)
     const shown = open.has(fsPath) ? yieldToVscode(ds, yieldOpt) : ds
     if (!shown.length) continue
@@ -63,13 +69,13 @@ function openGraph(context: vscode.ExtensionContext) {
   const html = readFileSync(join(context.extensionPath, 'dist', 'viewer.html'), 'utf8')
   // The viewer does not poll /graph. It receives IR through postMessage.
   const root = rootOf(vscode.window.activeTextEditor?.document)
-  const layFile = root ? join(root.uri.fsPath, '.sil', 'layout.json') : null
+  const layFile = root ? join(root, '.sil', 'layout.json') : null
   const lay = layFile && existsSync(layFile) ? readFileSync(layFile, 'utf8').replace(/</g, '\\u003c') : 'null'
   // Layout save path: webview → extension → .sil/layout.json (only when .sil exists).
   panel.webview.onDidReceiveMessage((m: { type?: string; saved?: unknown }) => {
-    if (m?.type === 'layout' && layFile && existsSync(join(root!.uri.fsPath, '.sil'))) { try { writeFileSync(layFile, JSON.stringify(m.saved)) } catch { /* */ } }
+    if (m?.type === 'layout' && layFile && existsSync(join(root!, '.sil'))) { try { writeFileSync(layFile, JSON.stringify(m.saved)) } catch { /* */ } }
   })
-  panel.webview.html = html.replace('</head>', `<script>window.__SIL_GRAPH__=null;window.__SIL_LANG__=${JSON.stringify(vscode.env.language)};window.__SIL_ROOT__=${JSON.stringify(root?.uri.fsPath ?? '')};window.__SIL_LAYOUT__=${lay};(function(){var v=acquireVsCodeApi();window.__SIL_SAVE_LAYOUT__=function(s){v.postMessage({type:'layout',saved:s})}})();window.addEventListener('message',e=>{if(e.data&&e.data.type==='graph'){window.__SIL_LAST__=e.data.graph;window.__SIL_SET__&&window.__SIL_SET__(e.data.graph)}})</script></head>`)
+  panel.webview.html = html.replace('</head>', `<script>window.__SIL_GRAPH__=null;window.__SIL_LANG__=${JSON.stringify(vscode.env.language)};window.__SIL_ROOT__=${JSON.stringify(root ?? '')};window.__SIL_LAYOUT__=${lay};(function(){var v=acquireVsCodeApi();window.__SIL_SAVE_LAYOUT__=function(s){v.postMessage({type:'layout',saved:s})}})();window.addEventListener('message',e=>{if(e.data&&e.data.type==='graph'){window.__SIL_LAST__=e.data.graph;window.__SIL_SET__&&window.__SIL_SET__(e.data.graph)}})</script></head>`)
   panel.onDidDispose(() => { panel = undefined })
   refresh(vscode.window.activeTextEditor?.document)
 }

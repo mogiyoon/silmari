@@ -31,6 +31,18 @@ test('lint --json: graph matches the expected result', () => {
 
 test('unknown command exits 2', () => { assert.equal(run('nope').status, 2) })
 
+test('lint without a dir finds the project root from a subfolder (nearest .sil/)', () => {
+  const r = spawnSync(process.execPath, ['--experimental-strip-types', MAIN, 'lint', '--json'], { encoding: 'utf8', cwd: resolve(AFTER, '.sil') })
+  const g = JSON.parse(r.stdout)
+  assert.ok(g.nodes.some((n: { id: string }) => n.id === 'flow.md'), 'run from inside .sil/, the graph is the whole fixture')
+})
+
+test('--version, --help, and their short forms; `sil version` and `sil help` too', () => {
+  const v = JSON.parse(readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8')).version
+  for (const a of [['--version'], ['-v'], ['version']]) assert.equal(run(...a).stdout.trim(), v, a.join(' '))
+  for (const a of [['--help'], ['-h'], ['help'], []]) { const r = run(...a); assert.match(r.stdout, /sil <command>/); assert.equal(r.status, 0, a.join(' ')) }
+})
+
 test('view --out: one HTML file containing the IR', { skip: !existsSync(resolve(import.meta.dirname, '../../viewer/dist/index.html')) && 'viewer not built' }, () => {
   const out = resolve(tmpdir(), `sil-view-${process.pid}.html`)
   const r = run('view', AFTER, `--out=${out}`)
@@ -127,7 +139,7 @@ test('init: creates SILMARI.md and makes all four agent start files refer to it;
   assert.match(readFileSync(resolve(a, 'GEMINI.md'), 'utf8'), /^# GEMINI\n\nSILMARI\.md is the entry point of everything in this project/, 'every tool gets the same plain line')
   assert.match(readFileSync(resolve(a, '.github/copilot-instructions.md'), 'utf8'), /follow SILMARI\.md/, 'other tools get a follow line')
   assert.ok(!readFileSync(resolve(a, 'AGENTS.md'), 'utf8').includes('migration'), 'no migration line without md files')
-  assert.match(readFileSync(resolve(a, 'SILMARI.md'), 'utf8'), /## Notation[\s\S]*\[use a subagent\]/, 'skeleton is English regardless of language')
+  assert.match(readFileSync(resolve(a, 'SILMARI.md'), 'utf8'), /## Notation[\s\S]*\(\(use a subagent\)\)/, 'skeleton is English regardless of language')
   const cfg = readFileSync(resolve(a, '.sil/config.yaml'), 'utf8')
   assert.match(cfg, /^entry: \[SILMARI\.md\]/m); assert.match(cfg, /^lang: ko/m)
   const b = resolve(tmpdir(), `sil-init-b-${process.pid}`); rmSync(b, { recursive: true, force: true }); mkdirSync(b)
