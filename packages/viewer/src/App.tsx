@@ -14,9 +14,10 @@ import {
 import '@xyflow/react/dist/style.css'
 import type { Graph, Node as SilNode, Edge as SilEdge, NodeKind, Diagnostic } from '@silmari/core'
 import { useGraph, type Phase } from './data.ts'
+import { useLayout } from './useLayout.ts'
 import { DICTS, LangCtx, initialLang, saveLang, useLang, type Lang } from './i18n.ts'
 import { GLCanvas, glHit, type GLEdge, type GLNode } from './gl.tsx'
-import { type Cell, type LabelOrder, cells, layout, skeleton, nodeSize, secPos, secHeight, SEC_W, SIZE, edgeLabelRows } from './layout.ts'
+import { type Cell, type LabelOrder, cells, skeleton, nodeSize, secPos, secHeight, SEC_W, SIZE, edgeLabelRows } from './layout.ts'
 import { loadLocal, saveLocal, loadFile, setFileSink, scheduleFileSave, flushFileSave, serverSink, webviewSink, edgeKey, type Saved } from './store.ts'
 
 const KIND: Record<NodeKind, { color: string }> = {
@@ -233,7 +234,7 @@ function Loading({ phase, error }: { phase: Phase; error: string | null }) {
 
 function Inner() {
   const { t, lang, setLang } = useLang()
-  const { graph, live, error, mode, root, phase } = useGraph()
+  const { graph, live, error, mode, root, phase, text: graphText } = useGraph()
   const [off, setOff] = useState<Set<NodeKind>>(new Set())
   const [sel, setSel] = useState<string | null>(null)
   const [selHead, setSelHead] = useState<{ doc: string; line: number } | null>(null)
@@ -379,8 +380,11 @@ function Inner() {
   })
   useEffect(() => { setMeasured(new Map()) }, [graph])
   // Expansion moves only lower nodes in that column. Expanded width is reserved in advance. Do not refit, so zoom stays unchanged
-  const useGL = flowMode !== 'map' && glOk && visible.size > GL_THRESHOLD
-  const placed = useMemo(() => (graph && flowMode !== 'map' ? layout(graph, visible, open, measured, saved.nodes, { labelOrder, heights: nodeH }) : { nodes: new Map<string, { x: number; y: number }>(), labels: new Map<number, { x: number; y: number }>(), cycles: new Set<number>(), sameCol: new Set<number>() }), [graph, visible, open, measured, saved.nodes, labelOrder, flowMode, nodeH])
+  // Layout: inline for small views, in a Web Worker for big ones (useLayout). `shown` is the visible set the returned layout belongs to;
+  // everything drawn below uses it, so while the worker computes a new picture the old one stays whole instead of half-moving
+  const layoutInput = useMemo(() => ({ visible, open, sizes: measured, pinned: saved.nodes, opts: { labelOrder, heights: nodeH } }), [visible, open, measured, saved.nodes, labelOrder, nodeH])
+  const { placed, visible: shown, pending: laying } = useLayout(graph, graphText, layoutInput, flowMode !== 'map')
+  const useGL = flowMode !== 'map' && glOk && shown.size > GL_THRESHOLD
   // Folding re-lays out the flow (a parent sits centered on its children), so the clicked node would jump. Remember where it was and,
   // once the new layout is in, move the viewport by the same amount so that node stays under the cursor
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null)
@@ -420,19 +424,19 @@ function Inner() {
   const byId = useMemo(() => new Map((graph?.nodes ?? []).map((n) => [n.id, n])), [graph])
   const isolatedTargets = useMemo(() => new Set((graph?.edges ?? []).filter((e) => e.isolated).map((e) => e.to)), [graph])
   // Same look as the DOM node: fill by kind, no border except purple 3px for subagent targets and pink for missing files
-  const glNodes: GLNode[] = useMemo(() => !useGL || !graph ? [] : graph.nodes.filter((n) => visible.has(n.id)).map((n) => {
+  const glNodes: GLNode[] = useMemo(() => !useGL || !graph ? [] : graph.nodes.filter((n) => shown.has(n.id)).map((n) => {
     const p = saved.nodes[n.id] ?? placed.nodes.get(n.id) ?? { x: 0, y: 0 }, s = { w: nodeSize(n, false).w, h: nodeH.get(n.id) ?? nodeSize(n, false).h }, iso = isolatedTargets.has(n.id)
     const fill = n.kind === 'ghost' ? '#7f1d1d' : KIND[n.kind].color
     const folded = hiddenBelow.has(n.id)
     const border = iso ? '#a78bfa' : n.kind === 'ghost' ? '#fca5a5' : folded ? '#e2e8f0' : fill
     return { id: n.id, x: p.x, y: p.y, w: s.w, h: s.h, color: fill, title: n.title, border, bw: iso ? 3 : n.kind === 'ghost' || folded ? 2 : 0, r: n.kind === 'task' ? 8 : 28 } // the DOM's border-radius: 8px, pills for docs
-  }), [useGL, graph, visible, placed, saved.nodes, isolatedTargets, hiddenBelow, nodeH])
+  }), [useGL, graph, shown, placed, saved.nodes, isolatedTargets, hiddenBelow, nodeH])
   // Same path as the DOM edge: through the label position (plus the user's drag offset), or the curve midpoint when there is no label
   const glEdges: GLEdge[] = useMemo(() => {
     if (!useGL || !graph) return []
     const seen = new Map<string, number>(), out: GLEdge[] = []
     graph.edges.forEach((e, i) => {
-      if (!visible.has(e.from) || !visible.has(e.to)) return
+      if (!shown.has(e.from) || !shown.has(e.to)) return
       const key = `${e.from}>${e.to}`, k = seen.get(key) ?? 0; seen.set(key, k + 1)
       const ghost = byId.get(e.to)?.kind === 'ghost', off = saved.labels[edgeKey(e)] ?? { dx: 0, dy: 0 }
       const lab = placed.labels.get(i)
@@ -446,7 +450,7 @@ function Inner() {
       out.push({ from: e.from, to: e.to, color: ghost ? '#f87171' : ETYPE[e.type], dashed: ghost || e.type !== 'call', lx: lx + off.dx, ly: ly + off.dy, tRight: placed.sameCol.has(i) })
     })
     return out
-  }, [useGL, graph, visible, byId, placed, saved.nodes, saved.labels])
+  }, [useGL, graph, shown, byId, placed, saved.nodes, saved.labels])
   // Nodes React Flow gets in hybrid mode: those inside the window, the WIN_CAP nearest the center when there are more. null means every visible node (DOM only)
   const winIds = useMemo(() => {
     if (!useGL) return null
@@ -507,7 +511,7 @@ function Inner() {
       })
     }
     for (const n of flowMode === 'map' ? [] : graph.nodes) {
-      if (!visible.has(n.id) || (winIds && !winIds.has(n.id))) continue
+      if (!shown.has(n.id) || (winIds && !winIds.has(n.id))) continue
       const isOpen = isOpenId(n.id)
       const s = nodeSize(n, isOpen)
       // A user-dragged position takes priority. Collapse and expansion do not reset it
@@ -523,8 +527,9 @@ function Inner() {
     setRfNodes((prev) => { const m = new Map(prev.map((x) => [x.id, x.measured])); return out.map((x) => (m.get(x.id) ? { ...x, measured: m.get(x.id) } : x)) })
     // Fit the view only when the graph or filter changes. This keeps zoom steady during expansion and collapse
     const key = `${graph.stats.files}|${graph.stats.edges}|${typeof flowMode === 'object' ? flowMode.cell : flowMode}|${[...visibleAll].join(',')}` // folding a subtree keeps the viewport
-    if (fitKey.current !== key) { fitKey.current = key; if (winIds) { pendingFit.current = null; fitAll.current() } else pendingFit.current = out.map((x) => x.id).join('|') } // fit once exactly these nodes are committed (below)
-  }, [graph, visible, visibleAll, open, placed, isolatedTargets, saved.nodes, setRfNodes, fitView, flowMode, cellList, winIds, kidsOf, hiddenBelow, nodeH]) // eslint-disable-line react-hooks/exhaustive-deps
+    // Not while the layout worker is still computing: there is nothing to fit yet, and the fit must happen once the positions arrive
+    if (!laying && fitKey.current !== key) { fitKey.current = key; if (winIds) { pendingFit.current = null; fitAll.current() } else pendingFit.current = out.map((x) => x.id).join('|') } // fit once exactly these nodes are committed (below)
+  }, [graph, shown, visibleAll, open, placed, laying, isolatedTargets, saved.nodes, setRfNodes, fitView, flowMode, cellList, winIds, kidsOf, hiddenBelow, nodeH]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Force measurement after unmeasured nodes (new heading boxes) enter the DOM. If the node list changes first (label measurement → layout),
   // React Flow cannot fill in handle positions. Edges for those nodes do not render
@@ -549,7 +554,7 @@ function Inner() {
     : { ...x, data: { ...(x as RN).data, hot: !!hi && hi.has(x.id), dim: !!focus && !focus.has(x.id), selected: sel === x.id } } as RN)
   const seen = new Map<string, number>()
   const edges: RE[] = (flowMode === 'map' ? [] : graph?.edges ?? []).flatMap((e, i) => {
-    if (!visible.has(e.from) || !visible.has(e.to) || (winIds && !(winIds.has(e.from) && winIds.has(e.to)))) return []
+    if (!shown.has(e.from) || !shown.has(e.to) || (winIds && !(winIds.has(e.from) && winIds.has(e.to)))) return []
     const key = `${e.from}>${e.to}`; const k = seen.get(key) ?? 0; seen.set(key, k + 1)
     const hot = hov !== null && (e.from === hov || e.to === hov) // the hovered node's own lines light up; nothing else changes
     const dim = !!focus && !(focus.has(e.from) && focus.has(e.to))
@@ -572,6 +577,7 @@ function Inner() {
              const { transform: [tx, ty, zoom], domNode } = rfStore.getState(); const r = domNode?.getBoundingClientRect(); if (!r) return
              const n = glHit(glNodes, { tx, ty, zoom }, ev.clientX - r.left, ev.clientY - r.top)
              if (n && !layerHide?.has(n.id) && kidsOf.has(n.id)) fold(n.id) }}>
+        {laying && <div className="busy" role="status"><span className="spin" />{t.laying}</div>}
         <LodCtx.Provider value={lod}>
         <ReactFlow className={useGL && !domShow ? 'domhide' : undefined} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange}
                    onNodeClick={(_, x) => { if (x.type === 'cell') { setView({ cell: (x as CN).data.key }); return } if (x.type === 'sec') { const d = (x as SN).data; setSel(d.doc); setSelHead({ doc: d.doc, line: d.h.line }) } else { setSel(x.id); setSelHead(null) } }}

@@ -8,12 +8,13 @@ export type Mode = 'poll' | 'push' | 'embedded'
 /** Where the first load is: the server is still parsing the files (or the host has not pushed yet), the JSON is coming down, or the
  *  browser is parsing it. Only the first load is tracked; later polls are cheap and would only make the label flicker */
 export type Phase = 'server' | 'download' | 'parse'
-export function useGraph(): { graph: Graph | null; live: boolean; error: string | null; mode: Mode; root: string; phase: Phase } {
+export function useGraph(): { graph: Graph | null; live: boolean; error: string | null; mode: Mode; root: string; phase: Phase; text: string | null } {
   const mode = window.__SIL_GRAPH__ === undefined ? 'poll' : window.__SIL_GRAPH__ === null ? 'push' : 'embedded'
   const [graph, setGraph] = useState<Graph | null>(mode === 'embedded' ? window.__SIL_GRAPH__! : null)
   const [error, setError] = useState<string | null>(null)
   const [root, setRoot] = useState<string>(window.__SIL_ROOT__ ?? '')
   const [phase, setPhase] = useState<Phase>('server')
+  const [text, setText] = useState<string | null>(null) // the JSON as received (poll mode): the layout worker parses it itself
   useEffect(() => {
     if (mode === 'embedded') return
     if (mode === 'push') {
@@ -38,7 +39,7 @@ export function useGraph(): { graph: Graph | null; live: boolean; error: string 
         const h = r.headers.get('x-sil-root'); if (h) setRoot(decodeURIComponent(h))
         if (!stop && txt !== last) {
           if (!last) { setPhase('parse'); await new Promise((res) => setTimeout(res, 0)) } // let the label paint before JSON.parse blocks the thread
-          last = txt; setGraph(JSON.parse(txt)); setError(null)
+          last = txt; setGraph(JSON.parse(txt)); setText(txt); setError(null)
         }
       } catch (e) { if (!stop) setError(String(e)) }
       finally { inflight = false }
@@ -47,5 +48,5 @@ export function useGraph(): { graph: Graph | null; live: boolean; error: string 
     const id = setInterval(tick, 2000)
     return () => { stop = true; clearInterval(id) }
   }, [mode])
-  return { graph, live: mode !== 'embedded', error, mode, root, phase }
+  return { graph, live: mode !== 'embedded', error, mode, root, phase, text }
 }
