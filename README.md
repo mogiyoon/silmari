@@ -61,9 +61,9 @@ Say yes and the agent moves the documents to the notation, following the *Migrat
 - **One call, one line.** Each step of the orchestrator is a heading with a link and its values: `[Analyst](agents/analyst.md) with {{>posting}} and receive {{<analysis}}`. A retry is a heading that states the condition and the bound.
 - **Diagrams, pseudocode and transfer tables stay for people.** The parser cannot read them; what they say is copied onto the call lines.
 - **Prose stays prose.** Rationale, error handling and examples are left as they are. The notation appears only on lines with calls.
-- **It ends with `sil lint` at error 0.**
+- **It ends with `sil lint` at error 0**, and then the agent deletes the question line from the agent start files, so it is not asked again.
 
-silmari does not touch the files. The agent moves the text; `sil lint` checks the result. To run it again later, tell the agent "start the migration" in a session; the line in CLAUDE.md stays. What a flow and its called documents look like after the move is the [demo corpus](packages/core/test/fixtures/after).
+silmari does not touch the files. The agent moves the text; `sil lint` checks the result. To run it again later, tell the agent "start the migration" in a session. What a flow and its called documents look like after the move is the [demo corpus](packages/core/test/fixtures/after).
 
 ## Notation: four things to learn
 

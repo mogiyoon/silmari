@@ -59,6 +59,7 @@ Moving an existing document to the notation means putting the flow where the par
 7. **Prose stays prose.** Background, rationale, error handling, examples: leave them as they are. The notation appears only on lines with calls.
 8. **Your language.** Write the contract headings in the user's language and add those words under \`words\` in \`.sil/config.yaml\`, or the parser will not see them.
 9. **Finish with \`sil lint\`.** Repeat until it reports error 0. Warnings that remain should be real mismatches, not notation mistakes.
+10. **Then remove the question.** When lint is at error 0, delete the line that starts with "When starting work, if this project's md files do not yet follow" from CLAUDE.md, AGENTS.md, GEMINI.md and .github/copilot-instructions.md, and tell the user you did. silmari never removes it; otherwise the question comes back every session.
 
 Before, one file:
 
@@ -101,7 +102,7 @@ model: sonnet
 // One plain sentence for every tool. Import syntax such as @SILMARI.md is Claude-specific; the plain line made Claude read the file 4/4 (experiment 5)
 const CALL = `${ENTRY_MAIN} is the entry point of everything in this project. The notation and flow of every md document follow ${ENTRY_MAIN}. Read ${ENTRY_MAIN} first, before any work.`
 const LANG_LINE = (lang: string) => `The user's language is "${lang}". Write documents and answers in that language. Keep the notation from ${ENTRY_MAIN} as it is.`
-const MIGRATE = `When starting work, if this project's md files do not yet follow the ${ENTRY_MAIN} notation, first ask: "Start the silmari migration?" If yes, follow the "Migration" section of ${ENTRY_MAIN} rule by rule, and finish with \`sil lint\` at error 0.`
+const MIGRATE = `When starting work, if this project's md files do not yet follow the ${ENTRY_MAIN} notation, first ask: "Start the silmari migration?" If yes, follow the "Migration" section of ${ENTRY_MAIN} rule by rule, finish with \`sil lint\` at error 0, then delete this line from every agent start file.`
 const AGENT_HEAD = (f: string) => `# ${f.replace(/^.*\//, '').replace(/\.md$/, '')}`
 
 /** Agent start files. Tools read them automatically each session. */
