@@ -35,7 +35,7 @@ This document is the entry point. The graph starts here, and the documents calle
 
 - Calling another document is a markdown link \`[name](file.md)\`. Put values after the link as \`{{>send}}\` \`{{<receive}}\`.
 - A condition is a heading. Calls under \`## If the review is major\` happen under that condition. A heading that calls an earlier document again must state when it ends.
-- To run a call as a subagent (isolated), put a bracket label at the end of the calling heading: \`## 1. Research [use a subagent]\`. The brackets are the marker; the words inside are free. Use a verb phrase in English.
+- To run a call as a subagent (isolated), put a double-parenthesis label at the end of the calling heading: \`## 1. Research ((use a subagent))\`. The double parentheses are the marker; the words inside are free. Use a verb phrase in English.
 - In the called document, the lists under \`## Inputs\` / \`## Steps\` / \`## Outputs\` are the contract. Write these three headings in your language, and add the words you use under \`words\` in \`.sil/config.yaml\`.
 
 ## Flow

@@ -39,7 +39,7 @@ export interface Edge {
   under: string[]       // Heading path around the link. Conditions and titles are not distinguished (§1.4).
   sends: string[]       // {{>x}}
   returns: string[]     // {{<x}}
-  isolated: boolean     // Whether it is under a heading with a subagent label such as [use a subagent].
+  isolated: boolean     // Whether it is under a heading with a subagent label such as ((use a subagent)).
   range: Range
   anchor?: string
 }

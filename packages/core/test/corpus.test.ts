@@ -39,7 +39,7 @@ test('A call without data is a mention edge', () => {
   assert.ok(flow.some((e) => e.to === 'wrap-up.md' && e.type === 'mention'))
 })
 
-test('Isolation: [subagent] applies only to research and review sections', () => {
+test('Isolation: ((use a subagent)) applies only to research and review sections', () => {
   for (const e of flow) {
     if (e.to === 'research.md' || e.to === 'review.md') assert.ok(e.isolated, e.to)
     if (e.to === 'plan.md' || e.to === 'implement.md') assert.ok(!e.isolated, e.to)

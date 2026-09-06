@@ -10,7 +10,9 @@ export function resolve(src: string, target: string): Resolved {
   if (/^[a-z]+:/.test(target)) return { kind: 'external', rel: null, anchor: null }
   if (target.startsWith('#')) return { kind: 'self', rel: null, anchor: target.slice(1) }
   const [p, anchor] = target.split('#', 2)
-  const rel = path.normalize(path.join(path.dirname(src), p))
+  // Like imports in code: `./x.md`, `../x.md` and bare `x.md` are relative to the document; a leading `/` means the project root
+  // (the folder with .sil/), the way `/src/x` does in bundlers and GitHub resolves `/docs/x.md` from the repository root
+  const rel = p.startsWith('/') ? path.normalize(p.slice(1)) : path.normalize(path.join(path.dirname(src), p))
   if (!rel.endsWith('.md')) return { kind: 'other', rel, anchor: anchor ?? null }
   return { kind: 'md', rel, anchor: anchor || null }
 }

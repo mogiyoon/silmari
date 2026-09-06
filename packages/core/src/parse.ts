@@ -12,8 +12,13 @@ export const CONTRACT_IN = new Set(DEFAULT_WORDS.inputs)
 export const CONTRACT_OUT = new Set(DEFAULT_WORDS.outputs)
 export const TASK_HEAD = new Set(DEFAULT_WORDS.task)
 // A subagent label is a bracket marker at the end of a heading. The graph reads the brackets as a marker. The text can be in any language: [서브 에이전트 사용] [use a subagent] [サブエージェント]. English uses a verb phrase. A single noun is read as a tag (experiment 4).
-// The model reads the words as instructions. The graph reads the marker as a label (§1.5). It reads only markers at the end of headings to avoid brackets inside titles. `@` is legacy notation. Models read it as a mention (experiment 3), so the parser accepts it but reports L-I04.
-const SUBAGENT = /\s*\[(@?)([^\]\s][^\]]*)\]\s*$/
+// The model reads the words as instructions. The graph reads the marker as a label (§1.5): double parentheses at the end of the heading,
+// `## 1. Research ((use a subagent))`. Only at the heading end, so parentheses inside titles are left alone. Double parentheses were chosen
+// over brackets because Markdown reads `[…]` as a reference link (editors and linters warn) and models followed `((…))` in every run
+// (experiment 7-2: 16/16 vs 14/16). The old `[…]` form is still read as a label so existing documents keep their graph, with L-I05; the
+// even older `[@…]` also reports L-I04 (models read `@` as a mention, experiment 3)
+const SUBAGENT = /\s*\(\(([^()\s][^()]*)\)\)\s*$/
+const LEGACY_SUBAGENT = /\s*\[(@?)([^\]\s][^\]]*)\]\s*$/
 const lower = (xs: string[]) => new Set(xs.map((x) => x.toLowerCase()))
 const ANCHOR = /\s*\{#([^}]+)\}\s*$/
 const MARK = /\{\{([<>*])([^}]*)\}\}/g
@@ -141,9 +146,17 @@ export function parseDoc(rel: string, src: string, words: Words = DEFAULT_WORDS)
       const raw = rawLines[n.position!.start.line - 1].replace(/^#{1,6}\s+/, '').trim()
       let text = raw
       const a = ANCHOR.exec(text); if (a) { doc.anchors.add(a[1]); text = text.slice(0, a.index).trim() }
-      const subm = SUBAGENT.exec(text), sub = !!subm
-      if (subm?.[1]) doc.diags.push({ code: 'L-I04', severity: 'info', where: `${rel}:${L(n)}`, message: `Drop the @ in the heading label: [use a subagent]. Models read @ as a mention, not an instruction`, range: { start: B(n.position!.start.offset!), end: B(n.position!.end.offset!) } })
-      const clean = text.replace(SUBAGENT, '').trim()
+      let sub = SUBAGENT.test(text)
+      let clean = text.replace(SUBAGENT, '').trim()
+      if (!sub) {
+        const old = LEGACY_SUBAGENT.exec(text)
+        if (old) {
+          sub = true; clean = text.replace(LEGACY_SUBAGENT, '').trim()
+          const range = { start: B(n.position!.start.offset!), end: B(n.position!.end.offset!) }
+          if (old[1]) doc.diags.push({ code: 'L-I04', severity: 'info', where: `${rel}:${L(n)}`, message: `Drop the @ in the heading label: ((use a subagent)). Models read @ as a mention, not an instruction`, range })
+          doc.diags.push({ code: 'L-I05', severity: 'info', where: `${rel}:${L(n)}`, message: `Write the heading label as ((${old[2].trim()})): Markdown reads [ ] as a reference link`, range })
+        }
+      }
       doc.anchors.add(slug(clean))
       while (stack.length && stack[stack.length - 1].level >= n.depth) stack.pop()
       const iso = sub || (stack.length ? stack[stack.length - 1].iso : false)

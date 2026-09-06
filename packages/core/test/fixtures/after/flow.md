@@ -2,7 +2,7 @@
 
 Handle one request in the order research → plan → implement → review. When the review has comments, go back to implement.
 
-## 1. Research [use a subagent]
+## 1. Research ((use a subagent))
 
 For each target file, call [research](research.md) with {{>target}} and receive {{<findings}}.
 
@@ -14,7 +14,7 @@ Call [plan](plan.md) with {{>findings}} and receive {{<plan}}.
 
 Call [implement](implement.md) with {{>plan}} and receive {{<changed-files}}.
 
-## 4. Review [use a subagent]
+## 4. Review ((use a subagent))
 
 Call [review](review.md) with {{>changed-files}} and receive {{<comments}}.
 
