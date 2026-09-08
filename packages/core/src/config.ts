@@ -9,12 +9,14 @@ export interface Config {
   entry: string[]
   /** The user's language tag (en, ko, ja …). Agents write documents and answers in it. The parser never depends on it: every marker is a symbol. */
   lang: string
+  /** The silmari version that wrote SILMARI.md and this file. `sil update` refreshes both and records the new one. Null when never recorded (before 0.3.1). */
+  version: string | null
 }
 
 export const CONFIG_PATH = '.sil/config.yaml'
 
 export function parseConfig(text: string): Config {
-  const cfg: Config = { strict: false, scan: { exclude: [] }, entry: [], lang: 'en' }
+  const cfg: Config = { strict: false, scan: { exclude: [] }, entry: [], lang: 'en', version: null }
   let section = ''
   for (const raw of text.split('\n')) {
     const ln = raw.replace(/#.*$/, '').trimEnd()
@@ -25,6 +27,7 @@ export function parseConfig(text: string): Config {
       const v = top[2].trim()
       if (section === 'strict') cfg.strict = v === 'true'
       if (section === 'lang' && v) cfg.lang = unq(v)
+      if (section === 'version' && v) cfg.version = unq(v)
       if (section === 'entry' && v) cfg.entry = list(v)
       continue
     }

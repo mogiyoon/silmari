@@ -250,10 +250,11 @@ test('Heading body range matches file-based body bytes with frontmatter, BOM, CR
 test('Config reads entry, scan.exclude, lang and strict; words is ignored; entry points are not orphans', async () => {
   const { parseConfig, isConventionalEntry } = await import('../src/config.ts')
   const c = parseConfig('entry: [CLAUDE.md, .claude/commands/go.md]\nscan:\n  exclude: [".sil/backups/**", "tmp/**"]\nstrict: true\n')
-  assert.deepEqual(c, { strict: true, scan: { exclude: ['.sil/backups/**', 'tmp/**'] }, entry: ['CLAUDE.md', '.claude/commands/go.md'], lang: 'en' })
+  assert.deepEqual(c, { strict: true, scan: { exclude: ['.sil/backups/**', 'tmp/**'] }, entry: ['CLAUDE.md', '.claude/commands/go.md'], lang: 'en', version: null })
   assert.deepEqual(parseConfig('entry:\n  - AGENTS.md\n  - 흐름.md\n').entry, ['AGENTS.md', '흐름.md'])
   assert.equal(parseConfig('lang: ja\n').lang, 'ja')
-  assert.deepEqual(parseConfig('words:\n  inputs: [입력]\n'), { strict: false, scan: { exclude: [] }, entry: [], lang: 'en' }, 'a 0.1.x words section is ignored without error')
+  assert.deepEqual(parseConfig('words:\n  inputs: [입력]\n'), { strict: false, scan: { exclude: [] }, entry: [], lang: 'en', version: null }, 'a 0.1.x words section is ignored without error')
+  assert.equal(parseConfig('version: 0.3.1   # who wrote SILMARI.md\n').version, '0.3.1', 'the recorded silmari version')
   assert.ok(isConventionalEntry('SILMARI.md') && isConventionalEntry('AGENTS.md') && isConventionalEntry('.github/prompts/x.prompt.md') && !isConventionalEntry('docs/x.md'))
   const base = { 'a.md': '# A\n\n[b](b.md) 에 {{>v}} 를 넘긴다.\n', 'b.md': '# B' + TASK }
   const g = buildGraph(new Map(Object.entries({ ...base, '흐름.md': '# 흐름\n\n설명.\n', 'AGENTS.md': '# 규칙\n' }).map(([r, s]) => [r, parseDoc(r, s)])), { entry: ['흐름.md'] })
