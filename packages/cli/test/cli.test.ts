@@ -206,8 +206,14 @@ test('update: refreshes the generated sections of SILMARI.md, moves Migration to
   writeFileSync(resolve(e, '.sil/config.yaml'), 'entry: [SILMARI.md]\nlang: ko\nwords:\n  inputs: [입력]\n')
   writeFileSync(resolve(e, 'SILMARI.md'), '# SILMARI\n\n## Notation\n\n- old\n\n## Flow\n\n- [a](a.md)\n'); writeFileSync(resolve(e, 'a.md'), '# A\n'); writeFileSync(resolve(e, 'CLAUDE.md'), '# C\n')
   const outE = run('update', e).stdout
-  assert.match(outE, /Created: \.sil\/updates\/0\.2\.0\.md\nCreated: \.sil\/updates\/0\.3\.0\.md\n/); assert.match(outE, /was 0\.1\.0, inferred/)
-  assert.match(readFileSync(resolve(e, '.sil/updates/0.2.0.md'), 'utf8'), /Contract headings[\s\S]*## \{\{>Inputs\}\}[\s\S]*Labels `\[…\]` → `\(\(…\)\)`/)
+  assert.match(outE, /Created: \.sil\/updates\/0\.1\.1\.md\nCreated: \.sil\/updates\/0\.2\.0\.md\nCreated: \.sil\/updates\/0\.3\.0\.md\n/); assert.match(outE, /was 0\.1\.0, inferred/)
+  assert.match(readFileSync(resolve(e, '.sil/updates/0.1.1.md'), 'utf8'), /Labels `\[…\]` → `\(\(…\)\)`/)
+  assert.match(readFileSync(resolve(e, '.sil/updates/0.2.0.md'), 'utf8'), /Contract headings[\s\S]*## \{\{>Inputs\}\}/)
+  assert.ok(!readFileSync(resolve(e, '.sil/updates/0.2.0.md'), 'utf8').includes('Labels `[…]`'), 'the label change is the 0.1.1 note, not repeated')
+  // A 0.1.1 project already has the double-parenthesis label: it starts at 0.2.0
+  writeFileSync(resolve(e, 'SILMARI.md'), '# SILMARI\n\n## Notation\n\n- put a double-parenthesis label at the end\n\n## Flow\n'); rmSync(resolve(e, '.sil/updates'), { recursive: true }); writeFileSync(resolve(e, '.sil/config.yaml'), 'entry: [SILMARI.md]\nwords:\n  inputs: [입력]\n')
+  const outE2 = run('update', e).stdout
+  assert.match(outE2, /was 0\.1\.1, inferred/); assert.ok(!outE2.includes('0.1.1.md') && outE2.includes('0.2.0.md'))
   assert.match(readFileSync(resolve(e, 'SILMARI.md'), 'utf8'), /## Running a call/, 'the generated sections a 0.1.x file never had are added')
   rmSync(e, { recursive: true, force: true })
   rmSync(d, { recursive: true, force: true })

@@ -221,14 +221,14 @@ export function migrate(dir: string): number {
 }
 
 /** The version an unrecorded project was set up with, read from what that version's sil init left behind:
- *  0.1.x had a `words:` block in the config and no Running section; 0.2.0 wrote the Running section; 0.3.0 said that a link can point
- *  at any file. Null when nothing tells (a hand-written entry point): then every note applies */
+ *  0.1.0 described a bracket label; 0.1.1 a double-parenthesis label, still with a `words:` block in the config and no Running section;
+ *  0.2.0 wrote the Running section; 0.3.0 said that a link can point at any file. Null when nothing tells (a hand-written entry point):
+ *  then every note applies */
 function inferVersion(root: string, entries: string[]): string | null {
   const cfgText = existsSync(resolve(root, CONFIG_PATH)) ? readFileSync(resolve(root, CONFIG_PATH), 'utf8') : ''
-  if (/^words:/m.test(cfgText)) return '0.1.0'
   const entry = entries.map((rel) => resolve(root, rel)).filter(existsSync).map((p) => readFileSync(p, 'utf8')).find((t) => t.includes('## Notation'))
-  if (entry === undefined) return null
-  if (!entry.includes('## Running a call')) return '0.1.0'
+  if (entry === undefined) return /^words:/m.test(cfgText) ? '0.1.0' : null
+  if (!entry.includes('## Running a call')) return entry.includes('double-parenthesis label') ? '0.1.1' : '0.1.0'
   return entry.includes('A link can point at any file') ? '0.3.0' : '0.2.0'
 }
 const GENERATED = ['Notation', 'Running a call', 'Subagents', 'Migration'] // the sections silmari owns in an entry document; Migration moved to .sil/migration.md in 0.3.1
