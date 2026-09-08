@@ -1,13 +1,13 @@
 // sil view. Interface 2. Design §7.5. A local server sends IR at /graph and serves the viewer HTML.
 // With --out, it writes one HTML file containing the IR without a server.
 import { createServer } from 'node:http'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, watch } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, watch } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { gzipSync } from 'node:zlib'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolve, join } from 'node:path'
 import { spawn } from 'node:child_process'
-import { loadDirAsync, existsIn, buildGraph, docCache, replaceBody, replaceBodies, writeRange, WriteError } from '@silmari/core'
+import { loadDirAsync, existsIn, globIn, buildGraph, docCache, replaceBody, replaceBodies, writeRange, WriteError } from '@silmari/core'
 import { readConfig } from './lint.ts'
 
 // Look for viewer.html next to the bundle (dist/sil.cjs) first. Otherwise use the workspace build.
@@ -47,13 +47,17 @@ function openBrowser(url: string) {
  *  The first load of a big corpus parses in worker threads (loadDirAsync); /graph requests that arrive meanwhile wait for that one build */
 const cache: { json: string; gz: Buffer; etag: string } = { json: '', gz: Buffer.alloc(0), etag: '' }
 
+/** Why a file cannot be shown as text: larger than 2 MB, or a NUL byte in the first 8 KB (binary). Null when it can */
+export const fileTextError = (buf: Buffer): string | null =>
+  buf.length > 2 * 1024 * 1024 ? 'File is larger than 2 MB' : buf.subarray(0, 8192).includes(0) ? 'Binary file' : null
+
 export async function view(dir: string, opt: { port?: number; out?: string; open?: boolean } = {}): Promise<number> {
   const root = resolve(dir)
   const cfg = readConfig(root)
   const html = viewerHtml()
   if (!html) { process.stderr.write('The viewer is not built: pnpm --filter @silmari/viewer build\n'); return 2 }
   const docs = docCache()
-  const build = async () => buildGraph(await loadDirAsync(root, cfg.scan.exclude, docs), { exists: existsIn(root), entry: cfg.entry })
+  const build = async () => buildGraph(await loadDirAsync(root, cfg.scan.exclude, docs), { exists: existsIn(root), glob: globIn(root), entry: cfg.entry })
 
   if (opt.out) {
     const out = resolve(opt.out)
@@ -139,9 +143,12 @@ export async function view(dir: string, opt: { port?: number; out?: string; open
       // Stage-2 editing: the whole file as text. GET returns it with its hash, PUT replaces it through Writer (hash-checked, backed up)
       const rel = url.searchParams.get('path') ?? ''
       const abs = resolve(root, rel)
-      if (!rel || !abs.startsWith(resolve(root) + '/') || !rel.endsWith('.md')) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'path must be an .md file inside the root' })); return }
-      if (!existsSync(abs)) { res.writeHead(404, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: `File not found: ${rel}` })); return }
+      // Any file inside the root, not only md: the side panel shows a linked json or log like an editor would. Binary and oversized files are refused
+      if (!rel || !abs.startsWith(resolve(root) + '/')) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'path must be inside the root' })); return }
+      if (!existsSync(abs) || statSync(abs).isDirectory()) { res.writeHead(404, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: `File not found: ${rel}` })); return }
       const buf = readFileSync(abs)
+      const why = fileTextError(buf)
+      if (why) { res.writeHead(415, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: why })); return }
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
       res.end(JSON.stringify({ text: buf.toString('utf8'), hash: createHash('sha1').update(buf).digest('hex') })); return
     }

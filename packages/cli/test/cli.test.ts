@@ -17,7 +17,7 @@ test('lint: reports the two known corpus issues. It exits 0 by default', () => {
   assert.equal(r.status, 0)
   assert.match(r.stdout, /error 2 · warning 0 · info 2/)
   assert.match(r.stdout, /L-N01/)
-  assert.match(r.stdout, /files 8 · task 6 · doc 2 · ghost 1 · call 7 · ref 5 · mention 2/, 'the kind summary is always printed')
+  assert.match(r.stdout, /files 8 · task 6 · doc 2 · file 0 · ghost 1 · call 7 · ref 5 · mention 2/, 'the kind summary is always printed')
 })
 
 test('lint --strict: exits 1 when there is an error', () => {
@@ -192,6 +192,29 @@ test('run: checks the call line before anything starts — (( )) label, --send n
   const help = r('--help'); assert.equal(help.status, 0); assert.match(help.stdout, /sil run claude --step flow\.md#1/); assert.match(help.stdout, /enforcement: os-sandbox/)
   const codex = r('codex', ...ok.slice(1, 7), '-m', 'gpt-5.4-mini', '-s', 'read-only', '--dry-run')
   assert.equal(codex.stdout.trim(), 'codex exec --json --skip-git-repo-check -c project_doc_max_bytes=0 "<prompt>" -m gpt-5.4-mini -s read-only')
+  rmSync(d, { recursive: true, force: true })
+})
+
+test('run: the subagent starts in the project root — links in the called document and (path) values are rewritten to it; {{>name}} in a target is filled from --send and must exist', () => {
+  const d = resolve(tmpdir(), `sil-run-root-${process.pid}`); rmSync(d, { recursive: true, force: true })
+  for (const sub of ['.sil', 'flows/agents', 'flows/references', 'docs']) mkdirSync(resolve(d, sub), { recursive: true })
+  writeFileSync(resolve(d, 'flows/flow.md'), '# 흐름\n\n## 1. 전문가 ((서브에이전트로, sil run))\n[전문가](agents/expert.md) 를 {{>topic}} 와 {{>spec}} 와 함께 부르고 {{<notes}} 를 받는다. {{#하이쿠}} 에서 {{+읽기}} 만 쓴다.\n')
+  writeFileSync(resolve(d, 'flows/agents/expert.md'), '# 전문가\n\n[규칙](../../docs/rules.md#톤) 을 따른다. [색인](../references/README.md) 과 [주제 문서](../references/{{>topic}}.md) 를 읽고 [자료](../references/{{>later}}.json) 는 나중에 정해진다. [밖](https://x.com) 은 그대로.\n\n[정의][def] 도 있다.\n\n[def]: ../references/README.md\n\n## {{>입력}}\n- topic — 주제\n- spec (path) — 규격 파일\n\n## {{<출력}}\n- notes\n')
+  writeFileSync(resolve(d, 'flows/references/README.md'), '# 색인\n'); writeFileSync(resolve(d, 'flows/references/hook.md'), '# 훅\n'); writeFileSync(resolve(d, 'docs/rules.md'), '# 규칙\n\n## 톤\n'); writeFileSync(resolve(d, 'docs/spec.json'), '{}\n')
+  const r = (...a: string[]) => spawnSync(process.execPath, ['--experimental-strip-types', MAIN, 'run', 'claude', '--step', 'flows/flow.md#1', ...a, '--model', 'haiku', '--tools', 'Read'], { encoding: 'utf8', cwd: d })
+  const p = r('--send', 'topic=hook', '--send', 'spec=../docs/spec.json', '--prompt-only')
+  assert.equal(p.status, 0, p.stderr)
+  assert.match(p.stdout, /File paths are relative to the current working directory/)
+  assert.match(p.stdout, /\[규칙\]\(docs\/rules\.md#톤\)/, 'a link above the flow folder resolves from the root and keeps its anchor')
+  assert.match(p.stdout, /\[색인\]\(flows\/references\/README\.md\)/, 'a sibling folder of the agent is written from the root')
+  assert.match(p.stdout, /\[주제 문서\]\(flows\/references\/hook\.md\)/, '{{>topic}} is filled from --send')
+  assert.match(p.stdout, /\[자료\]\(flows\/references\/\{\{>later\}\}\.json\)/, 'a value that is not sent stays a marker, root-relative')
+  assert.match(p.stdout, /\[밖\]\(https:\/\/x\.com\)/, 'external links are untouched')
+  assert.match(p.stdout, /\[def\]: flows\/references\/README\.md/, 'reference-style definitions are rewritten too')
+  assert.match(p.stdout, /- spec:\ndocs\/spec\.json/, 'a (path) value given relative to the flow file is shown from the root')
+  assert.doesNotMatch(p.stdout, /\.\.\//, 'nothing in the prompt climbs out of the root')
+  const bad = r('--send', 'topic=nope', '--send', 'spec=../docs/spec.json', '--prompt-only')
+  assert.equal(bad.status, 1); assert.match(bad.stderr, /links \.\.\/references\/\{\{>topic\}\}\.md, which becomes flows\/references\/nope\.md with the values sent, but no file exists there/)
   rmSync(d, { recursive: true, force: true })
 })
 

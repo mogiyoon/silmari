@@ -1,5 +1,5 @@
 // Code independent of VS Code. Checks a document set by file. Tests cover only this file.
-import { buildGraph, parseDoc, loadDir, existsIn, readConfig, type Diagnostic, type Graph, type Doc } from '@silmari/core'
+import { buildGraph, parseDoc, loadDir, existsIn, globIn, readConfig, type Diagnostic, type Graph, type Doc } from '@silmari/core'
 
 export interface FileDiag { code: string; severity: Diagnostic['severity']; line: number; message: string; range?: { start: number; end: number } }
 
@@ -27,7 +27,7 @@ export function graphWithOverride(root: string, exclude: string[], override?: { 
   const cfg = readConfig(root)
   const docs: Map<string, Doc> = loadDir(root, [...exclude, ...cfg.scan.exclude])
   if (override) docs.set(override.rel, parseDoc(override.rel, override.text))
-  return buildGraph(docs, { exists: existsIn(root), entry: cfg.entry })
+  return buildGraph(docs, { exists: existsIn(root), glob: globIn(root), entry: cfg.entry })
 }
 
 export function byFile(g: Graph): Map<string, FileDiag[]> {

@@ -85,10 +85,37 @@ test('L-G06: another call without a condition warns; one under a condition headi
   assert.ok(!codes({ 'a.md': '# A\n\n## 1\n[b](b.md) 에 {{>x}} 를 넘긴다.\n\n## 문제가 있으면\n[b](b.md) 에 {{>x}} 를 또 넘긴다.\n', 'b.md': b }).includes('L-G06'))
 })
 
-test('External URLs, images, and same-file anchors do not create edges (§1.7)', () => {
-  const g = buildGraph(new Map([['a.md', parseDoc('a.md', '# A\n\n[x](https://x.com) ![i](i.png) [목차](#a) [코드](x.ts)\n')]]))
+test('External URLs, images, and same-file anchors do not create edges (§1.7); a link to any other file does', () => {
+  const g = buildGraph(new Map([['a.md', parseDoc('a.md', '# A\n\n[x](https://x.com) ![i](i.png) [목차](#a)\n')]]))
   assert.equal(g.edges.length, 0)
   assert.ok(!g.diagnostics.some((d) => d.code === 'L-N01'))
+  // Any file can be linked: json, ts, log, a folder. The node is shown and checked for existence, never parsed
+  const f = buildGraph(new Map([['a.md', parseDoc('a.md', '# A\n\nRead [the code](src/x.ts) and [the spec](../spec.json).\n')]]), { exists: (rel) => rel === 'src/x.ts' })
+  assert.deepEqual(f.edges.map((e) => [e.to, e.type]), [['../spec.json', 'mention'], ['src/x.ts', 'ref']])
+  assert.equal(f.nodes.find((n) => n.id === 'src/x.ts')?.kind, 'file')
+  assert.equal(f.nodes.find((n) => n.id === '../spec.json')?.kind, 'ghost')
+  assert.deepEqual(f.diagnostics.map((d) => d.code), ['L-N01', 'L-N30'], 'missing file, and a link that leaves the project root')
+  const g2 = buildGraph(new Map([['a.md', parseDoc('a.md', '# A\n\n[data](data.json)\n')]]))
+  assert.equal(g2.nodes.find((n) => n.id === 'data.json')?.kind, 'file', 'without an exists callback the file is taken to exist')
+})
+
+test('template links: {{>name}} inside the target chooses the file at run time (L-N28, L-N29)', () => {
+  const docs = {
+    'flows/expert.md': '# Expert\n\n## {{>Inputs}}\n- topic\n\n## Steps\nRead [the reference](../refs/{{>topic}}.md) and [the data](../data/{{>topic}}.json), then [nothing](../nowhere/{{>other}}.md).\n\n## {{<Outputs}}\n- notes\n',
+    'refs/a.md': '# a\n', 'refs/b.md': '# b\n',
+  }
+  const g = buildGraph(new Map(Object.entries(docs).map(([rel, src]) => [rel, parseDoc(rel, src)])))
+  const ref = g.nodes.find((n) => n.id === 'refs/{{>topic}}.md')!
+  assert.equal(ref.kind, 'doc'); assert.equal(ref.desc, 'matches 2: refs/a.md, refs/b.md')
+  assert.equal(g.nodes.find((n) => n.id === 'data/{{>topic}}.json')?.kind, 'file', 'other files cannot be matched without a glob callback: taken to exist')
+  assert.equal(g.nodes.find((n) => n.id === 'nowhere/{{>other}}.md')?.kind, 'ghost')
+  assert.deepEqual(g.diagnostics.map((x) => x.code), ['L-N28', 'L-N29'], 'refs/a.md and refs/b.md are reached through the template, so no L-G01')
+  assert.match(g.diagnostics[1].message, /\{\{>other\}\} in the link target/)
+  const withGlob = buildGraph(new Map(Object.entries(docs).map(([rel, src]) => [rel, parseDoc(rel, src)])), { glob: (p) => (p === 'data/{{>topic}}.json' ? ['data/a.json'] : []) })
+  assert.equal(withGlob.nodes.find((n) => n.id === 'data/{{>topic}}.json')?.desc, 'matches 1: data/a.json')
+  assert.ok(codes({ 'a.md': '# A\n\n[x](r/{{>bad!name}}.md)\n' }).includes('L-N04'), 'the name rules apply inside a target')
+  // A value received from a call also fills a template
+  assert.ok(!codes({ 'f.md': '# F\n\n## 1\nCall [p](p.md) with {{>q}} and receive {{<topic}}.\n\n## 2\nRead [r](r/{{>topic}}.md).\n', 'p.md': '# P\n\n## {{>Inputs}}\n- q\n## {{<Outputs}}\n- topic\n', 'r/x.md': '# x\n' }).includes('L-N29'))
 })
 
 test('loadDir excludes .gitignore matches and .claude/worktrees', async () => {

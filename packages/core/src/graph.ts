@@ -5,17 +5,22 @@ import type { Graph, Node, Edge, Diagnostic, Contract } from './ir.ts'
 import type { Doc, Link } from './parse.ts'
 import { isConventionalEntry } from './config.ts'
 
-type Resolved = { kind: 'md' | 'self' | 'external' | 'other'; rel: string | null; anchor: string | null }
+/** template: the target carries `{{>name}}`, so rel is a pattern with the markers kept in place; the file is chosen when the step runs. */
+type Resolved = { kind: 'md' | 'self' | 'external' | 'other'; rel: string | null; anchor: string | null; template: boolean }
 export function resolve(src: string, target: string): Resolved {
-  if (/^[a-z]+:/.test(target)) return { kind: 'external', rel: null, anchor: null }
-  if (target.startsWith('#')) return { kind: 'self', rel: null, anchor: target.slice(1) }
+  if (/^[a-z]+:/.test(target)) return { kind: 'external', rel: null, anchor: null, template: false }
+  if (target.startsWith('#')) return { kind: 'self', rel: null, anchor: target.slice(1), template: false }
   const [p, anchor] = target.split('#', 2)
   // Like imports in code: `./x.md`, `../x.md` and bare `x.md` are relative to the document; a leading `/` means the project root
   // (the folder with .sil/), the way `/src/x` does in bundlers and GitHub resolves `/docs/x.md` from the repository root
   const rel = p.startsWith('/') ? path.normalize(p.slice(1)) : path.normalize(path.join(path.dirname(src), p))
-  if (!rel.endsWith('.md')) return { kind: 'other', rel, anchor: anchor ?? null }
-  return { kind: 'md', rel, anchor: anchor || null }
+  const template = /\{\{>/.test(rel)
+  if (!rel.endsWith('.md')) return { kind: 'other', rel, anchor: anchor ?? null, template }
+  return { kind: 'md', rel, anchor: anchor || null, template }
 }
+/** A template path as a matcher: every `{{>name}}` stands for one path segment (no `/`), the rest is literal. */
+export const templateRegex = (pattern: string): RegExp =>
+  new RegExp('^' + pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\{\\\{>[^}\\]*\\\}\\\}/g, '[^/]+') + '$')
 
 /** Uses the same form as Python's list repr. Diagnostic messages must match the golden file. */
 const fmt = (xs: string[]) => `[${xs.map((x) => `'${x}'`).join(', ')}]`
@@ -34,6 +39,9 @@ export interface BuildOptions {
   exists?: (rel: string) => boolean
   /** Configured entry points. They are added to the graph and excluded from orphan checks. Entry points normally have no incoming links. */
   entry?: string[]
+  /** Lists the files on disk that a template link (`refs/{{>topic}}.md`) matches, as project-relative paths. Without it, only scanned md files are matched,
+   *  and a template that points at other files is taken to exist. */
+  glob?: (pattern: string) => string[]
 }
 
 export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Graph {
@@ -59,23 +67,38 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
   }
   // Tool sets per called file, to spot a file that is called with different tools from different places (L-N24)
   const toolSets = new Map<string, Map<string, string>>()
+  const viaTemplate = new Set<string>() // files a template link can match: reached at run time, so not orphans (L-G01)
+  const ghost = (rel: string) => nodes.set(rel, { id: rel, kind: 'ghost', title: rel, desc: '', headings: [], contract: null, hash: '' })
+  const plain = (rel: string, kind: 'doc' | 'file', desc: string) => nodes.set(rel, { id: rel, kind, title: rel, desc, headings: [], contract: null, hash: '' })
   for (const d of docs.values()) for (const l of d.links) {
     const r = resolve(d.rel, l.target)
-    if (r.kind !== 'md') continue
+    if (r.kind === 'self' || r.kind === 'external') continue
     const rel = r.rel!, where = `${d.rel}:${l.line}`, data = hasData(l), range = l.range
+    // A subagent starts in the project root and receives only what is under it
+    if (rel.startsWith('../')) diags.push({ code: 'L-N30', severity: 'warning', where, message: `Link points outside the project root: ${l.target}. A subagent starts in the project root and only files under it reach it`, range })
     if (!nodes.has(rel)) {
-      if (opts.exists?.(rel)) nodes.set(rel, { id: rel, kind: 'doc', title: rel, desc: 'excluded from scan — the file exists', headings: [], contract: null, hash: '' })
-      else {
-        nodes.set(rel, { id: rel, kind: 'ghost', title: rel, desc: '', headings: [], contract: null, hash: '' })
-        diags.push({ code: 'L-N01', severity: 'error', where, message: `Linked file not found: ${l.target}`, range })
-      }
+      if (r.template) {
+        // The file is chosen at run time. The node stands for every file the pattern can match; it must match at least one now
+        const re = templateRegex(rel)
+        const matches = [...new Set([...[...docs.keys()].filter((k) => re.test(k)), ...(opts.glob?.(rel) ?? [])])].sort(cmp)
+        const checkable = r.kind === 'md' || opts.glob !== undefined
+        for (const m of matches) viaTemplate.add(m)
+        if (matches.length || !checkable) nodes.set(rel, { id: rel, kind: r.kind === 'md' ? (data ? 'task' : 'doc') : 'file', title: rel, desc: matches.length ? `matches ${matches.length}: ${matches.slice(0, 5).join(', ')}${matches.length > 5 ? ', …' : ''}` : '', headings: [], contract: null, hash: '' })
+        else { ghost(rel); diags.push({ code: 'L-N28', severity: 'error', where, message: `No file matches the template link: ${l.target}`, range }) }
+      } else if (r.kind === 'other') {
+        // Any file can be linked (json, log, a folder …). It is shown and checked, never parsed. Without an exists callback it is taken to exist
+        if (opts.exists === undefined || opts.exists(rel)) plain(rel, 'file', '')
+        else { ghost(rel); diags.push({ code: 'L-N01', severity: 'error', where, message: `Linked file not found: ${l.target}`, range }) }
+      } else if (opts.exists?.(rel)) plain(rel, 'doc', 'excluded from scan — the file exists')
+      else { ghost(rel); diags.push({ code: 'L-N01', severity: 'error', where, message: `Linked file not found: ${l.target}`, range }) }
     }
     const tgt = nodes.get(rel)!
     const tdoc = docs.get(rel)
     if (r.anchor && tdoc && !tdoc.anchors.has(r.anchor))
       diags.push({ code: 'L-N09', severity: 'error', where, message: `Anchor not found in the target document: ${l.target}`, range })
-    const type: Edge['type'] = tgt.kind === 'task' && data ? 'call' : tgt.kind === 'doc' ? 'ref' : data ? 'call' : 'mention'
-    if (tgt.kind === 'doc' && data) diags.push({ code: 'L-N14', severity: 'warning', where, message: `Data attached to a reference document: ${l.target}`, range })
+    const reference = tgt.kind === 'doc' || tgt.kind === 'file'
+    const type: Edge['type'] = tgt.kind === 'task' && data ? 'call' : reference ? 'ref' : data ? 'call' : 'mention'
+    if (reference && data) diags.push({ code: 'L-N14', severity: 'warning', where, message: `Data attached to a reference document: ${l.target}`, range })
     const e: Edge = { from: d.rel, to: rel, type, line: l.line, under: l.under, sends: l.sends, returns: l.returns, isolated: l.isolated, range: l.range }
     if (r.anchor) e.anchor = r.anchor
     if (l.tools.length) e.tools = l.tools
@@ -126,13 +149,16 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
       diags.push({ code: 'L-N23', severity: 'info', where: d.rel, message: `A sent value is neither received from a call nor declared in this document's contract: ${n}` })
     for (const [rel, ls] of calls) if (ls.length > 1 && ls.slice(1).some((l) => l.under.length <= 1))
       diags.push({ code: 'L-G06', severity: 'warning', where: d.rel, message: `${rel} is called again without a condition. There is no way out` })
+    // A value inside a link target is filled from this document's own values: an input, or something received from a call
+    for (const l of d.links) for (const n of [...new Set(l.params ?? [])]) if (!recv.has(n) && !d.contractIn.includes(n))
+      diags.push({ code: 'L-N29', severity: 'warning', where: `${d.rel}:${l.line}`, message: `{{>${n}}} in the link target ${l.target} is neither an input of this document nor received from a call, so it cannot be filled`, range: l.range })
   }
   const incoming = new Map<string, number>()
   for (const e of edges) incoming.set(e.to, (incoming.get(e.to) ?? 0) + 1)
   const structured = edges.some((e) => e.type === 'call')
   // Configured entry points and conventional ones such as CLAUDE.md, AGENTS.md, and slash commands normally have no incoming links.
   const entrySet = new Set(opts.entry ?? [])
-  for (const n of nodes.values()) if (structured && n.kind === 'doc' && !incoming.get(n.id) && !isConventionalEntry(n.id) && !entrySet.has(n.id))
+  for (const n of nodes.values()) if (structured && n.kind === 'doc' && !incoming.get(n.id) && !viaTemplate.has(n.id) && !isConventionalEntry(n.id) && !entrySet.has(n.id))
     diags.push({ code: 'L-G01', severity: 'warning', where: n.id, message: 'Reference document that nobody links to. A cleanup candidate; never deleted' })
 
   // Remove a diagnostic when its file, the file part of where, uses sil:ignore for that rule.

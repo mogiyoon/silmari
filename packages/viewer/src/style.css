@@ -15,7 +15,8 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 /* Text is never cut off anywhere: titles and names wrap and the box grows */
 .nd .t { font-weight: 600; font-size: 13px; white-space: normal; word-break: break-word; line-height: 1.3 }
 .nd .id { font-size: 11px; opacity: .75; white-space: normal; word-break: break-word }
-.nd.doc, .nd.ghost { border-radius: 28px; text-align: center }
+.nd.doc, .nd.file, .nd.ghost { border-radius: 28px; text-align: center }
+.nd.file { border-style: dotted; border-color: #94a3b8 }
 .nd.ghost { border-style: dashed; border-color: #fca5a5; background: #7f1d1d !important }
 .nd.iso { border-color: #a78bfa; border-width: 3px }
 .nd.sel { border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.25) }

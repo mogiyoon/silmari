@@ -7,6 +7,10 @@
 //   · the checks a program can do without understanding prose: the heading has a (( )) label, the --send names match the {{>…}} names,
 //     a flag is present when the call line declares tools or a model, a flag that does not restrict is refused, `(path)` values exist
 //   · the prompt: the called document's body, the values, and the reply format ({"<received name>": …})
+//   · the subagent starts in the project root (the folder with .sil/). Links in the called document are written relative to that document,
+//     so every link target and every (path) value is rewritten to the root before it enters the prompt; `{{>name}}` inside a target is
+//     filled from --send and the file must exist. Before this, a document in agents/ linking ../references/x.md sent the subagent to a
+//     path that did not exist whenever the flow file sat in another folder (2026-09-08)
 //   · the runtime's project start files switched off, so a subagent's rules come only from links in its own document
 //   · verification where the runtime reports what the model was given (Claude Code prints its tool list), honesty where it does not
 //   · a record of every run under .sil/run/, and a cached answer for an identical repeat
@@ -15,8 +19,8 @@
 import { spawnSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, createWriteStream } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { dirname, resolve, relative, join } from 'node:path'
-import { parseDoc, findProjectRoot, type Link, type Doc } from '@silmari/core'
+import { dirname, resolve, relative, join, sep } from 'node:path'
+import { parseDoc, findProjectRoot, resolve as resolveLink, type Link, type Doc } from '@silmari/core'
 
 /** What sil has to know about one runtime CLI. Everything else about the command line belongs to the caller. */
 export interface Adapter {
@@ -86,6 +90,8 @@ export const runUsage = (): string => `sil run <runtime> --step <flow.md>#<N> --
     (json)           a JSON string, typed or @file; refused when it does not parse     --send options='{"depth": 2}'
     (path)           the path itself, relative to the flow file; must exist; never @   --send spec=docs/design.md
   Every value lands in the prompt as it is. A (path) lands as the path string; the subagent opens it with its own tools.
+  The subagent starts in the project root (the folder with .sil/). Links in the called document and (path) values are rewritten
+  to that root, so the paths it opens are the ones the document meant. {{>name}} inside a link target is filled from --send.
 
   Runtimes and the flags that restrict tools (a flag that only pre-approves permissions is refused):
 ${Object.entries(ADAPTERS).map(([n, a]) => `    ${n.padEnd(8)} ${a.example}\n${''.padEnd(13)}tools: ${a.toolsFlags.join(' / ')} · model: ${a.modelFlags.join(' / ')} · enforcement: ${a.enforcement} · ${a.verifies ? 'verified from the output' : 'not verifiable from the output'}`).join('\n')}
@@ -150,7 +156,12 @@ export async function run(argv: string[]): Promise<number> {
   // The called document: its body is the prompt, its contract types are checked
   const targetAbs = resolve(flowDir, link.target.split('#')[0])
   if (!existsSync(targetAbs)) return fail(`called file not found: ${link.target}`)
-  const target = parseDoc(relative(flowDir, targetAbs), readFileSync(targetAbs, 'utf8'))
+  // The subagent's working directory is the project root, and every path in the prompt is written from there
+  const root = findProjectRoot(flowDir) ?? flowDir
+  const fromRoot = (abs: string) => relative(root, abs).split(sep).join('/')
+  const targetRel = fromRoot(targetAbs)
+  const src = readFileSync(targetAbs, 'utf8')
+  const target = parseDoc(targetRel, src)
   for (const [k, s] of sends) {
     const t = target.contractTypes[k]
     if (t === 'path') {
@@ -159,11 +170,18 @@ export async function run(argv: string[]): Promise<number> {
     }
     if (t === 'json') { try { JSON.parse(s.value) } catch { return fail(`${k} is a (json) input but the value is not valid JSON`) } }
   }
-  const body = stripFrontmatter(readFileSync(targetAbs, 'utf8')).trim()
+  // Links in the called document are relative to that document. Rewrite each target from the root, filling {{>name}} from --send
+  const rewritten = rewriteLinks(src, target, sends, (rel) => existsSync(join(root, rel)))
+  for (const m of rewritten.missing) {
+    if (m.filled) return fail(`${targetRel}:${m.line} links ${m.target}, which becomes ${m.rel} with the values sent, but no file exists there`)
+    process.stderr.write(`sil run: warning: ${targetRel}:${m.line} links ${m.target}, but ${m.rel} does not exist (sil lint reports this as L-N01)\n`)
+  }
+  const body = stripFrontmatter(rewritten.text).trim()
+  const shownValue = (k: string, s: { value: string }) => (target.contractTypes[k] === 'path' ? fromRoot(resolve(flowDir, s.value)) : s.value)
   const prompt = [
-    'This session runs one isolated step of a flow. The document below and the values after it are everything this step needs.',
+    'This session runs one isolated step of a flow. The document below and the values after it are everything this step needs. File paths are relative to the current working directory.',
     '', body, '', '## Values for this run',
-    ...[...sends].map(([k, s]) => `- ${k}:\n${s.value}`),
+    ...[...sends].map(([k, s]) => `- ${k}:\n${shownValue(k, s)}`),
     '', '## Reply format', `Reply with only a JSON object whose keys are: ${link.returns.join(', ') || 'result'}`, '',
   ].join('\n')
   if (promptOnly) { process.stdout.write(prompt); return 0 }
@@ -172,7 +190,6 @@ export async function run(argv: string[]): Promise<number> {
   if (dry) { process.stdout.write(shown + '\n'); return 0 }
   if (!installed(ad.exe)) return fail(`${ad.exe} is not installed. Installed runtimes: ${Object.entries(ADAPTERS).filter(([, a]) => installed(a.exe)).map(([n]) => n).join(', ') || 'none'}`)
   // Records live under the project's .sil/run/. An identical repeat (same step, values, flags, and called document) is answered from the cache
-  const root = findProjectRoot(flowDir) ?? flowDir
   const runDir = join(root, '.sil', 'run'); mkdirSync(join(runDir, 'cache'), { recursive: true })
   const key = createHash('sha1').update(JSON.stringify([rt, flow.rel, num, [...sends].map(([k, s]) => [k, s.value]), rest, target.hash])).digest('hex').slice(0, 16)
   const cachePath = join(runDir, 'cache', `${key}.json`)
@@ -181,7 +198,7 @@ export async function run(argv: string[]): Promise<number> {
   const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-step${num}`
   mkdirSync(join(runDir, id), { recursive: true })
   const streamFile = createWriteStream(join(runDir, id, 'stream.jsonl'))
-  const child = spawn(cmd[0], cmd.slice(1), { cwd: flowDir, env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'CLAUDECODE')) as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] })
+  const child = spawn(cmd[0], cmd.slice(1), { cwd: root, env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'CLAUDECODE')) as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] })
   let given: string[] | undefined, model: string | undefined, result: string | undefined; const used: string[] = []; let stderr = ''; let aborted: string | null = null
   const wanted = flagValue(rest, ['--tools'])?.split(/[,\s]+/).filter(Boolean)
   child.stderr.on('data', (d) => { stderr += String(d) })
@@ -217,6 +234,31 @@ export async function run(argv: string[]): Promise<number> {
 }
 
 const installed = (exe: string) => spawnSync('which', [exe], { encoding: 'utf8' }).status === 0
+
+/** Rewrites every link target of the called document so it resolves from the project root, where the subagent starts. `{{>name}}` inside
+ *  a target is filled from the values sent; a target that still has a marker (its value comes from a later call) keeps it, root-relative.
+ *  Inline links are replaced by their byte range from the end of the file (INV-8); reference-style links live in their definition lines.
+ *  `missing` lists targets with nothing on disk; `filled` marks the ones a sent value completed, which the caller refuses. */
+export function rewriteLinks(src: string, doc: Doc, sends: Map<string, { value: string }>, exists: (rel: string) => boolean): { text: string; missing: { line: number; target: string; rel: string; filled: boolean }[] } {
+  const missing: { line: number; target: string; rel: string; filled: boolean }[] = []
+  const retarget = (raw: string, line: number): string => {
+    let t: string; try { t = decodeURIComponent(raw) } catch { t = raw }
+    const filled = t.replace(/\{\{>([^}]*)\}\}/g, (m, n: string) => sends.get(n.trim())?.value ?? m)
+    const r = resolveLink(doc.rel, filled)
+    if (r.kind === 'self' || r.kind === 'external') return raw
+    if (!r.template && !exists(r.rel!)) missing.push({ line, target: t, rel: r.rel!, filled: filled !== t })
+    return r.rel! + (r.anchor ? `#${r.anchor}` : '')
+  }
+  let buf = Buffer.from(src, 'utf8')
+  for (const l of doc.links.filter((x) => !x.refstyle).sort((a, b) => b.range.start - a.range.start)) {
+    const slice = buf.subarray(l.range.start, l.range.end).toString('utf8')
+    const out = slice.replace(/\]\(\s*(<[^>]*>|[^\s)]+)([^)]*)\)$/, (_m, url: string, tail: string) => `](${retarget(url.startsWith('<') ? url.slice(1, -1) : url, l.line)}${tail})`)
+    if (out !== slice) buf = Buffer.concat([buf.subarray(0, l.range.start), Buffer.from(out, 'utf8'), buf.subarray(l.range.end)])
+  }
+  const joined = buf.toString('utf8')
+  const text = joined.replace(/^(\s{0,3}\[[^\]]+\]:\s*)(\S+)/gm, (_m, head: string, url: string, offset: number) => head + retarget(url, joined.slice(0, offset).split('\n').length))
+  return { text, missing }
+}
 const stripFrontmatter = (src: string) => { const l = src.split('\n'); if (l[0] !== '---') return src; const e = l.indexOf('---', 1); return e < 0 ? src : l.slice(e + 1).join('\n') }
 /** The reply should be a JSON object with the received names as keys. When it is not, the whole text becomes the first received value */
 function extractJson(text: string, returns: string[]): Record<string, unknown> {

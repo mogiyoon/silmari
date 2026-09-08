@@ -24,12 +24,16 @@ const ANCHOR = /\s*\{#([^}]+)\}\s*$/
 const CONTRACT_HEAD = /^\{\{([<>])([^}]*)\}\}$/
 const CONTRACT_HEAD_PREFIX = /^\{\{[<>][^}]*\}\}\s*\S/
 const MARK = /\{\{([<>*+#])([^}]*)\}\}/g
+/** A value inside a link target: `[doc](../references/{{>topic}}.md)`. Filled from the document's own inputs when the step runs. */
+export const PARAM = /\{\{>([^}]*)\}\}/g
 export const NAME = /^[\p{L}\p{N}][\p{L}\p{N}_-]*$/u // Letters from any language are allowed. Spaces and symbols are not.
 const TYPES = new Set<ValueType>(['path', 'text', 'json'])
 
 export interface Link {
   text: string; target: string; line: number; range: Range
   sends: string[]; returns: string[]
+  /** `{{>name}}` inside the target, in order. A template link: the file is chosen by a value of the document that contains the link. */
+  params: string[]
   /** `{{+…}}` after the link: the tools the subagent may use, in the author's words. `{{#…}}`: its model. Free text; the orchestrator translates them into its runtime's flags. */
   tools: string[]; model: string | null
   under: string[]; isolated: boolean; refstyle: boolean
@@ -122,8 +126,16 @@ export function parseDoc(rel: string, src: string): Doc {
           if (target === undefined) { doc.diags.push({ code: 'L-N03', severity: 'error', where: `${rel}:${line}`, message: `Reference-style link has no definition: [${key}]`, range: { start: B(n.position!.start.offset!), end: B(n.position!.end.offset!) } }); continue }
         }
         const p = n.position!
-        last = { text, target: decodeURIComponent(target), line,
-                 range: { start: B(p.start.offset!), end: B(p.end.offset!) },
+        const range = { start: B(p.start.offset!), end: B(p.end.offset!) }
+        // `{{>name}}` inside the target: the same name rules as a sent value
+        const params: string[] = []
+        for (const m of target.matchAll(PARAM)) {
+          const name = m[1].trim()
+          if (!name) doc.diags.push({ code: 'L-N18', severity: 'warning', where: `${rel}:${line}`, message: `Empty marker {{>}} in a link target: nothing is read from it`, range })
+          else if (!NAME.test(name)) doc.diags.push({ code: 'L-N04', severity: 'error', where: `${rel}:${line}`, message: `Invalid name: {{>${name}}}`, range })
+          else params.push(name)
+        }
+        last = { text, target: decodeURIComponent(target), line, range, params,
                  sends: [], returns: [], tools: [], model: null, under, isolated: iso, refstyle: n.type === 'linkReference' }
         doc.links.push(last)
       } else if (n.type === 'text') {

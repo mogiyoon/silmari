@@ -18,10 +18,10 @@ import { useLayout } from './useLayout.ts'
 import { DICTS, LangCtx, initialLang, saveLang, useLang, type Lang } from './i18n.ts'
 import { GLCanvas, glHit, type GLEdge, type GLNode } from './gl.tsx'
 import { type Cell, type LabelOrder, cells, skeleton, entryView, nodeSize, secPos, secHeight, SEC_W, SIZE, edgeLabelRows } from './layout.ts'
-import { loadLocal, saveLocal, loadFile, setFileSink, scheduleFileSave, flushFileSave, serverSink, webviewSink, edgeKey, type Saved } from './store.ts'
+import { loadLocal, saveLocal, loadFile, setFileSink, scheduleFileSave, flushFileSave, serverSink, webviewSink, readFileText, edgeKey, type Saved } from './store.ts'
 
 const KIND: Record<NodeKind, { color: string }> = {
-  task: { color: '#2563eb' }, doc: { color: '#059669' }, ghost: { color: '#dc2626' },
+  task: { color: '#2563eb' }, doc: { color: '#059669' }, file: { color: '#64748b' }, ghost: { color: '#dc2626' },
 }
 // There are three line types. Solid = call with data. Dashed = link only (mention or reference). Red dashed = missing file
 const ETYPE: Record<SilEdge['type'], string> = { call: '#cbd5e1', mention: '#94a3b8', ref: '#94a3b8' }
@@ -59,7 +59,8 @@ function SilNodeView({ id, data }: NodeProps<RN>) {
   const s = nodeSize(n, data.open)
   // Text is never cut: the title and file name wrap, the node grows, and the real height goes back to the layout
   useEffect(() => { const el = ref.current; if (el && !data.open) data.onSize(n.id, el.offsetHeight) })
-  const bar = n.kind !== 'ghost' || data.kids > 0 || !!data.drill
+  const leaf = n.kind === 'ghost' || n.kind === 'file' // nothing inside to expand: no headings, no prompt
+  const bar = !leaf || data.kids > 0 || !!data.drill
   return (
     <div ref={ref} className={`nd ${n.kind}${data.selected ? ' sel' : ''}${data.hot ? ' hot' : ''}${data.isolated ? ' iso' : ''}${data.open ? ' open' : ''}`}
          style={{ width: s.w, ...(data.open ? { height: s.h } : { minHeight: s.h }), background: data.open ? undefined : KIND[n.kind].color, borderColor: data.open ? KIND[n.kind].color : undefined, opacity: data.dim ? 0.15 : 1 }}>
@@ -76,7 +77,7 @@ function SilNodeView({ id, data }: NodeProps<RN>) {
           </>) : (
             <button className="tg fold nodrag" title={t.foldOne} onClick={(ev) => { ev.stopPropagation(); data.fold(n.id) }}>◂</button>
           ))}
-          {n.kind !== 'ghost' && !data.drill && (
+          {!leaf && !data.drill && (
             <button className="tg nodrag" title={data.open ? t.collapse : t.expandTitle}
                     onClick={(ev) => { ev.stopPropagation(); data.toggle(n.id) }}>{data.open ? '▴' : '▾'}</button>
           )}
@@ -394,6 +395,7 @@ function Inner() {
   // Unfold this node and everything below it in one go
   const unfoldDeep = (id: string) => update((s) => { pin(id); const c = new Set(s.collapsed ?? [...collapsed]); const walk = (x: string) => { c.delete(x); for (const k of kidsOf.get(x) ?? []) walk(k) }; walk(id); return { ...s, collapsed: [...c] } })
   // Folding or unfolding everything changes the picture completely, so the view refits (a single node's fold keeps the viewport instead)
+  // Folding applies inside one flow. The overview map and the entry overview show flows as boxes, so the rail button is hidden there
   const foldAll = () => { fitKey.current = ''; const keep = new Set([...(graph?.entry ?? []), ...(flowRoot ? [flowRoot] : [])]); update((s) => ({ ...s, collapsed: trees.flatMap(({ tree }) => [...tree.rank].filter(([id, r]) => r >= 1 && tree.kids.has(id) && !keep.has(id)).map(([id]) => id)) })) }
   const unfoldAll = () => { fitKey.current = ''; update((s) => ({ ...s, collapsed: [] })) }
   // Measured node heights (titles wrap). Same idea as labels: estimate, render, measure, lay out again
@@ -659,7 +661,7 @@ function Inner() {
         </button>
         <button className="railbtn lang" onClick={() => setLang(lang === 'ko' ? 'en' : 'ko')} title={t.langSwitchTitle} aria-label={t.langSwitchTitle}>{t.langSwitch}</button>
         <button className={`railbtn lang${labelOrder === 'flow' ? ' on' : ''}`} onClick={toggleOrder} title={t.orderTitle(labelOrder)} aria-label={t.orderTitle(labelOrder)}>{labelOrder === 'flow' ? t.orderFlow : t.orderChildren}</button>
-        {kidsOf.size > 0 && <button className={`railbtn lang${collapsed.size ? ' on' : ''}`} onClick={collapsed.size ? unfoldAll : foldAll} title={collapsed.size ? t.expandAll : t.collapseAll} aria-label={collapsed.size ? t.expandAll : t.collapseAll}>{collapsed.size ? '▸▸' : '◂◂'}</button>}
+        {kidsOf.size > 0 && flowMode !== 'map' && flowMode !== 'entry' && <button className={`railbtn lang${collapsed.size ? ' on' : ''}`} onClick={collapsed.size ? unfoldAll : foldAll} title={collapsed.size ? t.expandAll : t.collapseAll} aria-label={collapsed.size ? t.expandAll : t.collapseAll}>{collapsed.size ? '▸▸' : '◂◂'}</button>}
       </nav>
     </div>
   )
@@ -752,7 +754,7 @@ function Legend() {
       <div>{line(undefined, '#cbd5e1')}<span>{t.legendCall}</span></div>
       <div>{line('6 4', '#94a3b8')}<span>{t.legendRef}</span></div>
       <div>{line('6 4', '#f87171')}<span>{t.legendMissing}</span></div>
-      <div><i style={{ background: KIND.task.color }} /><span>{t.legendTask}</span><i style={{ background: KIND.doc.color }} /><span>{t.legendDoc}</span><i style={{ background: KIND.ghost.color }} /><span>{t.legendGhost}</span></div>
+      <div><i style={{ background: KIND.task.color }} /><span>{t.legendTask}</span><i style={{ background: KIND.doc.color }} /><span>{t.legendDoc}</span><i style={{ background: KIND.file.color }} /><span>{t.legendFile}</span><i style={{ background: KIND.ghost.color }} /><span>{t.legendGhost}</span></div>
       <div><i className="isoi" /><span>{t.legendSubagent}</span></div>
     </div>
   )
@@ -794,6 +796,7 @@ function Detail({ graph, node: n, go, selHead, isOpen, toggle, edit }: { graph: 
   const rawHere = edit.raw?.doc === n.id ? edit.raw : null
   const out = graph.edges.filter((e) => e.from === n.id), inn = graph.edges.filter((e) => e.to === n.id)
   const head = selHead?.doc === n.id ? n.headings.find((h) => h.line === selHead.line) : undefined
+  const leaf = n.kind === 'ghost' || n.kind === 'file' // no headings to expand or edit; a file shows its text instead
   const row = (e: SilEdge, other: string) => (
     <div key={`${e.from}${e.to}${e.line}`} className="er">
       <span className="et">{e.type}</span> <a onClick={() => go(other)}>{other}</a>
@@ -806,10 +809,10 @@ function Detail({ graph, node: n, go, selHead, isOpen, toggle, edit }: { graph: 
   return (
     <>
       <div className="t">{n.title} <code className="muted">{n.kind}</code>
-        {n.kind !== 'ghost' && <button className="detailbtn" onClick={() => toggle(n.id)}>{isOpen ? t.collapseBtn : t.expandBtn}</button>}
+        {leaf || <button className="detailbtn" onClick={() => toggle(n.id)}>{isOpen ? t.collapseBtn : t.expandBtn}</button>}
         {/* Stage 1: prompt bodies as textareas; Save writes every changed body, including bodies in called documents. Stage 2: the whole file as text */}
-        {n.kind !== 'ghost' && editable && !edit.editing && !rawHere && <button className="detailbtn edit" title={t.editTitle} onClick={edit.start}>{t.edit}</button>}
-        {n.kind !== 'ghost' && editable && !edit.editing && !rawHere && <button className="detailbtn edit raw" title={t.rawTitle} onClick={() => edit.startRaw(n.id)}>{t.rawEdit}</button>}
+        {!leaf && editable && !edit.editing && !rawHere && <button className="detailbtn edit" title={t.editTitle} onClick={edit.start}>{t.edit}</button>}
+        {!leaf && editable && !edit.editing && !rawHere && <button className="detailbtn edit raw" title={t.rawTitle} onClick={() => edit.startRaw(n.id)}>{t.rawEdit}</button>}
         {edit.editing && <button className="detailbtn ghost" onClick={edit.cancel}>{t.cancel}</button>}
         {edit.editing && <button className="detailbtn save" disabled={!edit.dirty} onClick={edit.save}>{t.save}{edit.dirty ? ` ${edit.dirty}` : ''}</button>}
         {rawHere && <button className="detailbtn ghost" onClick={edit.cancelRaw}>{t.cancel}</button>}
@@ -842,26 +845,36 @@ function Detail({ graph, node: n, go, selHead, isOpen, toggle, edit }: { graph: 
       </Det>
       {/* Prompt. If a heading is selected, show it, its subheadings, and documents called in that section. Otherwise, show the whole document and all called documents.
           Do not show parent or sibling headings */}
-      {rawHere ? null : head ? (() => {
+      {n.kind === 'file' ? <FileText id={n.id} /> : rawHere ? null : head ? (() => {
         const hs = n.headings, i = hs.indexOf(head)
         let j = i + 1; while (j < hs.length && hs[j].level > head.level) j++
         const endLine = j < hs.length ? hs[j].line : Infinity
         return (
           <>
             <div className="prompt-of"><span className="muted">{t.prompt}</span> <b>{'#'.repeat(head.level)} {head.text}</b> <span className="muted">{t.thisSectionOnly}</span></div>
-            <HeadingTree key={`${n.id}:${head.line}`} doc={n.id} hash={n.hash} hs={hs.slice(i, j)} />
+            <HeadingTree key={`${n.id}:${head.line}`} doc={n.id} hash={n.hash} hs={hs.slice(i, j)} defaultOpen />
             <Descendants graph={graph} id={n.id} go={go} within={(e) => e.line >= head.line && e.line < endLine} />
           </>
         )
       })() : (
         <>
           <div className="prompt-of"><span className="muted">{t.prompt}</span> <b>{n.title}</b></div>
-          <HeadingTree key={n.id} doc={n.id} hash={n.hash} hs={n.headings} />
+          <HeadingTree key={n.id} doc={n.id} hash={n.hash} hs={n.headings} defaultOpen />
           <Descendants graph={graph} id={n.id} go={go} />
         </>
       )}
     </>
   )
+}
+
+/** A linked file that is not Markdown (json, log …): its text, read-only, like opening it in an editor. Binary or oversized files come back as an error */
+function FileText({ id }: { id: string }) {
+  const { t } = useLang()
+  const [st, setSt] = useState<{ id: string; text?: string; error?: string } | null>(null)
+  useEffect(() => { let alive = true; readFileText(id).then((r) => { if (alive) setSt({ id, ...r }) }); return () => { alive = false } }, [id])
+  if (!st || st.id !== id) return <div className="leaf muted">{t.loading.server}</div>
+  if (st.error) return <div className="leaf muted">{st.error}</div>
+  return <><div className="prompt-of"><span className="muted">{t.fileText}</span> <b>{id}</b></div><pre className="body">{st.text}</pre></>
 }
 
 /** Prompts of documents called by this node. In call order, also show their called documents (for a → b → c, selecting a shows a·b·c; selecting b shows b·c) */
@@ -874,13 +887,15 @@ function Descendants({ graph, id, go, within }: { graph: Graph; id: string; go: 
     for (const e of graph.edges) {
       if (e.from !== from || seen.has(e.to)) continue
       if (depth === 0 && within && !within(e)) continue // Exclude calls outside the heading section
-      const t = byId.get(e.to); if (!t || t.kind === 'ghost') continue
+      const t = byId.get(e.to); if (!t || t.kind === 'ghost' || t.kind === 'file') continue // a file has no prompt
       seen.add(e.to); chain.push({ node: t, depth, via: e }); walk(e.to, depth + 1)
     }
   }
   walk(id, 0)
   if (!chain.length) return null
+  // One group for all of them, closed by default: the selected document's own prompt stays in view, the called ones open on demand
   return (
+    <Det k={`cs:${id}`} className="child group" summary={<><span className="muted">{t.promptOf}</span><b>{t.calledDocs(chain.length)}</b></>}>
     <div className="desc-chain">
       {chain.map(({ node: c, depth, via }) => (
         <Det key={c.id} k={`c:${c.id}`} className="child" style={{ marginLeft: depth * 12 }} summary={<>
@@ -894,12 +909,14 @@ function Descendants({ graph, id, go, within }: { graph: Graph; id: string; go: 
         </Det>
       ))}
     </div>
+    </Det>
   )
 }
 
 /** Which accordions are open, saved with the layout (browser + .sil/layout.json) so they follow the project: right-panel sections by id,
  *  and inside the selected-node panel 'm' = the metadata block, 'c:<doc>' = a called document's prompt, 'h:<doc>:<line>' = a heading.
- *  Everything starts closed */
+ *  Everything starts closed, except the selected document's own headings: those start open, and a key with a leading '!' remembers
+ *  one the user closed */
 const UiCtx = createContext<{ secs: Set<string>; flipSec: (id: string) => void; det: Set<string>; setDet: (k: string, open: boolean) => void }>(
   { secs: new Set(), flipSec: () => {}, det: new Set(), setDet: () => {} })
 /** A <details> whose open state is remembered under key k */
@@ -922,11 +939,11 @@ function BodyEditor({ doc, hash, h }: { doc: string; hash: string; h: Hd }) {
   )
 }
 
-function HeadingTree({ doc, hash, hs }: { doc: string; hash: string; hs: SilNode['headings'] }) {
+function HeadingTree({ doc, hash, hs, defaultOpen }: { doc: string; hash: string; hs: SilNode['headings']; defaultOpen?: boolean }) {
   const { t: tt } = useLang()
   // Heading array → nested <details>. A deeper level is a child (# contains ##, ## contains ###). The same or a higher level is a sibling.
   // Keep open/closed state in React. With <details open> alone, every render such as hover forced it open and the accordion would not close.
-  // Everything starts closed; the user opens the headings they want to read
+  // The selected document (defaultOpen) shows its whole prompt at once; called documents start closed and the user opens what they want
   type T = { h: SilNode['headings'][number]; kids: T[] }
   const roots: T[] = []; const st: T[] = []
   for (const h of hs) {
@@ -935,9 +952,10 @@ function HeadingTree({ doc, hash, hs }: { doc: string; hash: string; hs: SilNode
     ;(st.length ? st[st.length - 1].kids : roots).push(t); st.push(t)
   }
   const { det, setDet } = useContext(UiCtx)
-  const onToggle = (line: number) => (ev: SyntheticEvent<HTMLDetailsElement>) => { const o = ev.currentTarget.open; if (o !== det.has(`h:${doc}:${line}`)) setDet(`h:${doc}:${line}`, o) }
+  const isOpen = (line: number) => (defaultOpen ? !det.has(`!h:${doc}:${line}`) : det.has(`h:${doc}:${line}`))
+  const onToggle = (line: number) => (ev: SyntheticEvent<HTMLDetailsElement>) => { const o = ev.currentTarget.open; if (o !== isOpen(line)) (defaultOpen ? setDet(`!h:${doc}:${line}`, !o) : setDet(`h:${doc}:${line}`, o)) }
   const render = (t: T) => (
-    <details key={t.h.line} open={det.has(`h:${doc}:${t.h.line}`)} onToggle={onToggle(t.h.line)}>
+    <details key={t.h.line} open={isOpen(t.h.line)} onToggle={onToggle(t.h.line)}>
       <summary>
         <span className="muted">{'#'.repeat(t.h.level)} </span>{t.h.text}
         {t.h.subagent && <span className="badge iso">{tt.subagent}</span>}<span className="muted"> :{t.h.line}</span>
