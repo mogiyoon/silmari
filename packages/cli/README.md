@@ -35,9 +35,12 @@ cd my-agent-project     # any folder with md files
 sil init                # .sil/config.yaml + SILMARI.md, and a line in CLAUDE.md · AGENTS.md · GEMINI.md · copilot-instructions.md that points agents at it
 sil lint                # read every md file, print what is wrong
 sil view                # open the graph in the browser; it redraws when a file changes
+sil update              # after upgrading silmari: refresh the generated parts of SILMARI.md and hand the agent the notes on what changed
 ```
 
 `sil init` records your language (`--lang=ko`, else the locale). Agents then write SILMARI.md and their replies in that language. silmari itself rewrites nothing.
+
+After upgrading silmari, run `sil update` in each project. It replaces the generated sections of SILMARI.md (Notation, Running a call, Subagents) and leaves your Flow section and any section you added. When the notation changed since the version recorded in `.sil/config.yaml`, it writes one note per version to `.sil/updates/` and adds one line to the agent start files: at the next session the agent explains each change to you in plain words (how it was written before, how it is written now), asks whether to apply it to your documents, and when done deletes the notes and the line. `sil lint` reminds you with L-I06 when SILMARI.md is older than the installed silmari, and with L-I07 while notes wait.
 
 Here is what `sil lint` prints for the [demo corpus](https://github.com/mogiyoon/silmari/blob/main/packages/core/test/fixtures/after):
 
@@ -52,13 +55,13 @@ For CI, `--strict` makes the command exit with code 1 on any error. `--json` pri
 
 ## Migrating existing documents
 
-If the folder already contains md files, `sil init` adds one line to the agent start files. The next time the agent starts, it asks:
+If the folder already contains md files, `sil init` writes the migration rules to `.sil/migration.md` and adds one line to the agent start files. The next time the agent starts, it asks:
 
 ```
 Start the silmari migration?
 ```
 
-Say yes. The agent moves the documents to the notation by following the *Migration* section of `SILMARI.md` one rule at a time:
+Say yes. The agent moves the documents to the notation by following `.sil/migration.md` one rule at a time:
 
 - **One agent, one file.** An agent that was a section inside an orchestrator (`### 1. Analyst — tools · model …`) becomes its own md file. The same paragraph names the tools and model in a sentence: `Use the tools {{+read}} and {{+edit}}, and the model {{#fast}}.` No frontmatter.
 - **The contract lives in the called file.** Its input and output bullets become lists under `## {{>Inputs}}` / `## {{<Outputs}}` in that file, not in the caller.
@@ -66,9 +69,9 @@ Say yes. The agent moves the documents to the notation by following the *Migrati
 - **One call, one line.** Each orchestrator step is a heading with a link and its values: `[Analyst](agents/analyst.md) with {{>posting}} and receive {{<analysis}}`. A retry is a heading that states the condition and limit.
 - **Diagrams, pseudocode and transfer tables stay for people.** The parser cannot read them. Their information is copied onto the call lines.
 - **Prose stays prose.** Rationale, error handling and examples remain unchanged. The notation appears only on lines with calls.
-- **It ends with `sil lint` at error 0**. The agent then deletes the question line from the agent start files, so it does not ask again.
+- **It ends with `sil lint` at error 0**. The agent then deletes `.sil/migration.md` and the question line from the agent start files, so nothing of the migration stays behind.
 
-silmari does not touch the files. The agent moves the text. `sil lint` checks the result. To run the migration again later, tell the agent "start the migration" during a session. The [demo corpus](https://github.com/mogiyoon/silmari/blob/main/packages/core/test/fixtures/after) shows a flow and its called documents after migration.
+silmari does not touch the files. The agent moves the text. `sil lint` checks the result. To run the migration again later, `sil migrate` writes the rules and the question line back. The [demo corpus](https://github.com/mogiyoon/silmari/blob/main/packages/core/test/fixtures/after) shows a flow and its called documents after migration.
 
 ## Notation: six symbols
 

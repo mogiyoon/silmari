@@ -142,9 +142,10 @@ test('init: creates SILMARI.md and makes all four agent start files refer to it;
   assert.ok(!readFileSync(resolve(a, 'AGENTS.md'), 'utf8').includes('migration'), 'no migration line without md files')
   const sk = readFileSync(resolve(a, 'SILMARI.md'), 'utf8')
   assert.match(sk, /## Notation[\s\S]*\(\(use a subagent via sil run\)\)[\s\S]*## Running a call[\s\S]*## Subagents/, 'skeleton is English regardless of language and carries the running and subagent rules')
-  assert.match(sk, /## Migration[\s\S]*One agent, one file[\s\S]*Finish with `sil lint`[\s\S]*Then remove the question/, 'skeleton carries the migration rules, not only the notation summary; the last rule removes the question line')
+  assert.ok(!sk.includes('## Migration'), 'the migration rules are a one-time job: they live in .sil/migration.md, not in the file every session reads')
+  assert.ok(!existsSync(resolve(a, '.sil/migration.md')), 'no migration document without md files')
   const cfg = readFileSync(resolve(a, '.sil/config.yaml'), 'utf8')
-  assert.match(cfg, /^entry: \[SILMARI\.md\]/m); assert.match(cfg, /^lang: ko/m)
+  assert.match(cfg, /^entry: \[SILMARI\.md\]/m); assert.match(cfg, /^lang: ko/m); assert.match(cfg, /^version: \d+\.\d+\.\d+/m, 'the version that wrote the files is recorded')
   const b = resolve(tmpdir(), `sil-init-b-${process.pid}`); rmSync(b, { recursive: true, force: true }); mkdirSync(b)
   assert.match(run('init', b, '--lang=en').stdout, /Created: CLAUDE\.md \(agent start file/)
   assert.equal(readFileSync(resolve(b, 'CLAUDE.md'), 'utf8'), '# CLAUDE\n\n[SILMARI.md](SILMARI.md) is the entry point of everything in this project. The notation and flow of every md document follow SILMARI.md. Read SILMARI.md first, before any work.\n')
@@ -153,7 +154,8 @@ test('init: creates SILMARI.md and makes all four agent start files refer to it;
   assert.match(run('init', d, '--lang=ja').stdout, /Appended: AGENTS\.md \(SILMARI\.md call · language ja · migration prompt\)/)
   const ag = readFileSync(resolve(d, 'AGENTS.md'), 'utf8')
   assert.match(ag, /follow SILMARI\.md/); assert.match(ag, /language is "ja"/); assert.match(ag, /Start the silmari migration\?/)
-  assert.match(ag, /Start the silmari migration\?[^\n]*then delete this line from every agent start file/, 'the question line says the agent removes it when done — silmari never does')
+  assert.match(ag, /Start the silmari migration\?[^\n]*follow \.sil\/migration\.md rule by rule[^\n]*then delete that file and this line from every agent start file/, 'the question line points at the migration document and says the agent removes both when done — silmari never does')
+  assert.match(readFileSync(resolve(d, '.sil/migration.md'), 'utf8'), /^# Moving this project's documents[\s\S]*One agent, one file[\s\S]*Finish with `sil lint`[\s\S]*delete this file/, 'the migration rules, ending with the deletion of the file itself')
   assert.match(readFileSync(resolve(d, 'CLAUDE.md'), 'utf8'), /follow SILMARI\.md.*\n.*"ja".*\n.*migration/, 'new files get the same lines')
   run('init', d, '--lang=ja'); assert.equal(readFileSync(resolve(d, 'AGENTS.md'), 'utf8'), ag, 'a second init appends nothing')
   const e = resolve(tmpdir(), `sil-init-e-${process.pid}`); rmSync(e, { recursive: true, force: true }); mkdirSync(e)
@@ -164,6 +166,41 @@ test('init: creates SILMARI.md and makes all four agent start files refer to it;
   assert.match(run('init', c, '--entry=flow.md').stdout, /entry skeleton/)
   assert.match(readFileSync(resolve(c, '.sil/config.yaml'), 'utf8'), /^entry: \[flow\.md\]/m)
   for (const x of [a, b, c, d, e]) rmSync(x, { recursive: true, force: true })
+})
+
+test('update: refreshes the generated sections of SILMARI.md, moves Migration to .sil/migration.md, writes the update notes with a prompt line, records the version; a second run changes nothing; lint points at it', () => {
+  const d = resolve(tmpdir(), `sil-update-${process.pid}`); rmSync(d, { recursive: true, force: true }); mkdirSync(resolve(d, '.sil'), { recursive: true })
+  // A project as sil init 0.3.0 left it: no version in the config, a Migration section (with fenced examples) in SILMARI.md, the old question line
+  writeFileSync(resolve(d, '.sil/config.yaml'), 'entry: [SILMARI.md]\nlang: ko\n')
+  writeFileSync(resolve(d, 'flow.md'), '# Flow\n\nWork.\n')
+  writeFileSync(resolve(d, 'SILMARI.md'), '# SILMARI\n\nIntro kept.\n\n## Notation\n\nold notation text\n\n## Running a call\n\nold\n\n## Subagents\n\nold\n\n## Flow\n\n- [Feature work](flow.md)\n\n## My rules\n\nBe brief.\n\n## Migration\n\nold rules\n\n```markdown\n## Agents\n### 1. Analyst\n```\n\n- [Late link](flow.md)\n')
+  writeFileSync(resolve(d, 'CLAUDE.md'), '# CLAUDE\n\n[SILMARI.md](SILMARI.md) is the entry point.\nWhen starting work, if this project\'s md files do not yet follow the SILMARI.md notation, first ask: "Start the silmari migration?" If yes, follow the "Migration" section of SILMARI.md rule by rule, finish with `sil lint` at error 0, then delete this line from every agent start file.\n')
+  const before = run('lint', d).stdout
+  assert.match(before, /L-I06 +SILMARI\.md was written by silmari before 0\.3\.1; installed is \d+\.\d+\.\d+\. Run sil update/)
+  const out = run('update', d).stdout
+  assert.match(out, /Updated: SILMARI\.md \(Notation · Running a call · Subagents refreshed · Migration moved to \.sil\/migration\.md\)/)
+  assert.match(out, /Updated: CLAUDE\.md \(migration line points at \.sil\/migration\.md\)/); assert.match(out, /Created: \.sil\/migration\.md/)
+  assert.match(out, /Created: \.sil\/updates\/0\.3\.0\.md/); assert.match(out, /Appended: CLAUDE\.md \(update notes prompt\)/); assert.match(out, /Recorded: \.sil\/config\.yaml version \d+\.\d+\.\d+\n/)
+  const sk = readFileSync(resolve(d, 'SILMARI.md'), 'utf8')
+  assert.match(sk, /^# SILMARI\n\nIntro kept\.\n\n## Notation\n\nSix symbols/, 'head kept, generated section replaced')
+  assert.match(sk, /## Running a call\n\n1\. If the calling heading/); assert.match(sk, /## Subagents\n\nA step whose heading/)
+  assert.match(sk, /## Flow\n\n- \[Feature work\]\(flow\.md\)\n\n## My rules\n\nBe brief\.\n\n- \[Late link\]\(flow\.md\)\n$/, 'user sections in their order; the line added after the old Migration section survives')
+  assert.ok(!sk.includes('## Migration') && !sk.includes('## Agents'), 'Migration gone, and a heading inside its fenced example is not mistaken for a section')
+  const cl = readFileSync(resolve(d, 'CLAUDE.md'), 'utf8')
+  assert.match(cl, /follow \.sil\/migration\.md rule by rule/); assert.ok(!cl.includes('"Migration" section'))
+  assert.match(cl, /apply the update notes in \.sil\/updates\/: first tell the user[^\n]*then ask: "Start the silmari update\?"[^\n]*delete those files and this line/)
+  assert.match(readFileSync(resolve(d, '.sil/updates/0.3.0.md'), 'utf8'), /^# silmari 0\.3\.0[\s\S]*## 1\. Tell the user first[\s\S]*Before: only md documents[\s\S]*## 2\. If yes/)
+  assert.match(readFileSync(resolve(d, '.sil/config.yaml'), 'utf8'), /^entry: \[SILMARI\.md\]\nlang: ko\nversion: \d+\.\d+\.\d+/, 'the version line is added, the rest untouched')
+  assert.match(run('lint', d).stdout, /L-I07 +1 update note not applied yet: 0\.3\.0\.md/)
+  const again = run('update', d).stdout
+  assert.match(again, /Unchanged: SILMARI\.md\nUp to date: \d+\.\d+\.\d+\n$/)
+  assert.equal(readFileSync(resolve(d, 'CLAUDE.md'), 'utf8'), cl, 'no second prompt line')
+  // migrate: writes the document again and the question line where it is missing
+  rmSync(resolve(d, '.sil/migration.md')); writeFileSync(resolve(d, 'AGENTS.md'), '# Codex\n')
+  const mig = run('migrate', d).stdout
+  assert.match(mig, /Created: \.sil\/migration\.md\nAppended: AGENTS\.md \(migration prompt\)\n$/, 'CLAUDE.md already has the line')
+  assert.match(run('update', resolve(tmpdir())).stderr, /no \.sil\/ found above/)
+  rmSync(d, { recursive: true, force: true })
 })
 
 test('run: checks the call line before anything starts — (( )) label, --send names, tools/model flags, rejected flags, (path) values; --dry-run shows the command', () => {

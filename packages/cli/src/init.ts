@@ -9,11 +9,14 @@
 // Models do not know our notation. The rules must be where models read them. SILMARI.md alone scored 0/3; a plain 'read SILMARI.md before working' line in CLAUDE.md scored 4/4 (experiment 5).
 import { resolve, dirname } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
-import { ENTRY_MAIN, CONFIG_PATH, loadDir } from '@silmari/core'
+import { ENTRY_MAIN, CONFIG_PATH, loadDir, readConfig, findProjectRoot } from '@silmari/core'
+import { silVersion, compareVersions } from './version.ts'
+import { UPDATE_NOTES } from './updates.ts'
 /** .sil/config.yaml. The parser drops everything after #. */
-const template = (entry: string[], lang: string) => `# silmari settings. Everything works without this file. Every key is optional.
+const template = (entry: string[], lang: string, version: string) => `# silmari settings. Everything works without this file. Every key is optional.
 entry: [${entry.join(', ')}]   # entry point: the root of the graph. Documents called from here form the flow
 lang: ${lang}              # the user's language. Agents write documents and answers in it. The notation itself has no language
+version: ${version}        # the silmari that wrote SILMARI.md and this file. \`sil update\` refreshes them and records the new version
 scan:
   exclude: [".sil/backups/**"]   # .gitignore is always respected
 strict: false          # true: exit code 1 when there is an error
@@ -81,8 +84,11 @@ A step whose heading ends with a \`(( ))\` label runs as a subagent: a fresh ses
 ## Flow
 
 Link the flow documents here. Example: \`[Feature work](flow.md)\`
-
-## Migration
+`
+/** .sil/migration.md: how to move existing documents to the notation. Written by init when md files exist, and by `sil migrate`; the agent
+ *  deletes it when the migration is done (rule 10). It is not part of SILMARI.md, which every session reads, because it is a one-time job */
+export const MIGRATION_PATH = '.sil/migration.md'
+const migrationDoc = () => `# Moving this project's documents to the silmari notation
 
 Moving an existing document to the notation means putting the flow where the parser can read it. Adding a few headings or one \`{{ }}\` is not a migration. Follow these rules for every document that calls other agents.
 
@@ -95,7 +101,7 @@ Moving an existing document to the notation means putting the flow where the par
 7. **Values attach only to calls.** A link to a rules or reference document carries no \`{{ }}\`.
 8. **Prose stays prose.** Background, rationale, error handling, examples: leave them as they are. The notation appears only on lines with calls and on contract headings.
 9. **Finish with \`sil lint\`.** Repeat until it reports error 0 and the last line shows task and call counts above 0. Warnings that remain should be real mismatches, not notation mistakes.
-10. **Then remove the question.** When lint is at error 0, delete the line that starts with "When starting work, if this project's md files do not yet follow" from CLAUDE.md, AGENTS.md, GEMINI.md and .github/copilot-instructions.md, and tell the user you did. silmari never removes it; otherwise the question comes back every session.
+10. **Then remove the question.** When lint is at error 0, delete this file (\`.sil/migration.md\`) and the line that starts with "When starting work, if this project's md files do not yet follow" from CLAUDE.md, AGENTS.md, GEMINI.md and .github/copilot-instructions.md, and tell the user you did. silmari never removes them; otherwise the question comes back every session.
 
 Before, one file:
 
@@ -135,12 +141,19 @@ Follow the [writing rules](../RULES.md).
 - analysis — a bullet list of skills and tone
 \`\`\`
 `
+
 // One plain sentence for every tool. Import syntax such as @SILMARI.md is Claude-specific; the plain line made Claude read the file 4/4 (experiment 5).
 // The first mention is a markdown link, so the graph has a real edge from every start file to the entry point (the viewer's entry view starts there).
 // The link is relative to the start file's folder: `.github/copilot-instructions.md` links `../SILMARI.md`
 const CALL = (f: string) => `[${ENTRY_MAIN}](${f.includes('/') ? '../'.repeat(f.split('/').length - 1) : ''}${ENTRY_MAIN}) is the entry point of everything in this project. The notation and flow of every md document follow ${ENTRY_MAIN}. Read ${ENTRY_MAIN} first, before any work.`
 const LANG_LINE = (lang: string) => `The user's language is "${lang}". Write documents and answers in that language. Keep the notation from ${ENTRY_MAIN} as it is.`
-const MIGRATE = `When starting work, if this project's md files do not yet follow the ${ENTRY_MAIN} notation, first ask: "Start the silmari migration?" If yes, follow the "Migration" section of ${ENTRY_MAIN} rule by rule, finish with \`sil lint\` at error 0, then delete this line from every agent start file.`
+/** The start of the migration question line, in every wording since 0.2.0. `sil update` rewrites an old line to the current one */
+export const MIGRATE_PREFIX = "When starting work, if this project's md files do not yet follow"
+const MIGRATE = `${MIGRATE_PREFIX} the ${ENTRY_MAIN} notation, first ask: "Start the silmari migration?" If yes, follow ${MIGRATION_PATH} rule by rule, finish with \`sil lint\` at error 0, then delete that file and this line from every agent start file.`
+/** The line `sil update` adds when it wrote notes to .sil/updates/. The agent applies them in version order and deletes them and this line */
+export const UPDATE_PREFIX = 'When starting work, apply the update notes in'
+export const UPDATES_DIR = '.sil/updates'
+const UPDATE_LINE = `${UPDATE_PREFIX} ${UPDATES_DIR}/: first tell the user, in their language and in plain words, what each note changed (how it was written before, how it is written now), then ask: "Start the silmari update?" If yes, apply the notes in version order, finish with \`sil lint\` at error 0, then delete those files and this line from every agent start file.`
 const AGENT_HEAD = (f: string) => `# ${f.replace(/^.*\//, '').replace(/\.md$/, '')}`
 
 /** Agent start files. Tools read them automatically each session. */
@@ -151,6 +164,7 @@ function linkAgentFiles(root: string, lang: string) {
   const skip = new Set([ENTRY_MAIN, ...AGENT_FILES])
   const hasDocs = [...loadDir(root).keys()].some((rel) => !skip.has(rel))
   const what = `${ENTRY_MAIN} call${lang !== 'en' ? ` · language ${lang}` : ''}${hasDocs ? ' · migration prompt' : ''}`
+  if (hasDocs) writeMigrationDoc(root)
   for (const f of AGENT_FILES) {
     const lines = [CALL(f), ...(lang !== 'en' ? [LANG_LINE(lang)] : []), ...(hasDocs ? [MIGRATE] : [])]
     const p = resolve(root, f)
@@ -184,8 +198,103 @@ export function init(dir: string, opt: { entry?: string; lang?: string } = {}): 
     linkAgentFiles(root, lang)
   }
   mkdirSync(resolve(root, '.sil'), { recursive: true })
-  writeFileSync(p, template(entry, lang))
+  writeFileSync(p, template(entry, lang, silVersion()))
   process.stdout.write(`Created: ${p}\n`)
   process.stdout.write(`Entry: ${entry.join(', ')}\n`)
+  return 0
+}
+
+const writeMigrationDoc = (root: string) => { mkdirSync(resolve(root, '.sil'), { recursive: true }); writeFileSync(resolve(root, MIGRATION_PATH), migrationDoc()); process.stdout.write(`Created: ${MIGRATION_PATH}\n`) }
+const hasLine = (p: string, prefix: string) => existsSync(p) && readFileSync(p, 'utf8').split('\n').some((l) => l.startsWith(prefix))
+
+/** sil migrate. Writes .sil/migration.md again and puts the question line back into the start files that lack it, for a migration run later. */
+export function migrate(dir: string): number {
+  const root = findProjectRoot(resolve(dir))
+  if (!root) { process.stderr.write(`sil migrate: no .sil/ found above ${resolve(dir)}. Run sil init first.\n`); return 1 }
+  writeMigrationDoc(root)
+  for (const f of AGENT_FILES) {
+    const p = resolve(root, f)
+    if (!existsSync(p) || hasLine(p, MIGRATE_PREFIX)) continue
+    appendFileSync(p, `${MIGRATE}\n`); process.stdout.write(`Appended: ${f} (migration prompt)\n`)
+  }
+  return 0
+}
+
+const GENERATED = ['Notation', 'Running a call', 'Subagents', 'Migration'] // the sections silmari owns in an entry document; Migration moved to .sil/migration.md in 0.3.1
+/** A document as its head and its level-2 sections, each with the heading line. Blank lines at section ends are dropped and put back on join */
+function sections(text: string): { head: string; list: { name: string; text: string }[] } {
+  const list: { name: string; text: string }[] = []; const head: string[] = []
+  let cur: { name: string; lines: string[] } | null = null
+  const flush = () => { if (cur) list.push({ name: cur.name, text: cur.lines.join('\n').trimEnd() }) }
+  let fence = false // a `## ` line inside a fenced code block (the migration examples have them) is not a heading
+  for (const ln of text.split('\n')) {
+    if (/^\s*```/.test(ln)) fence = !fence
+    const m = fence ? null : /^## (.+?)\s*$/.exec(ln)
+    if (m) { flush(); cur = { name: m[1], lines: [ln] } } else if (cur) cur.lines.push(ln); else head.push(ln)
+  }
+  flush()
+  return { head: head.join('\n').trimEnd(), list }
+}
+/** The entry document with its generated sections replaced by the current ones, the user's sections kept in their order, and the
+ *  Migration section dropped. Null when the document has no generated section (a hand-written entry point): nothing to refresh */
+export function refreshEntry(text: string): string | null {
+  const old = sections(text)
+  if (!old.list.some((x) => GENERATED.includes(x.name))) return null
+  const fresh = sections(skeleton(ENTRY_MAIN))
+  // The generated Migration section ended with a fenced example. Lines a user added after it (the end of the file) are theirs: keep them
+  const tail = old.list.filter((x) => x.name === 'Migration').map((x) => x.text.slice(x.text.lastIndexOf('```') + 3).trim()).filter(Boolean)
+  const parts = [old.head, ...fresh.list.filter((x) => GENERATED.includes(x.name)).map((x) => x.text), ...old.list.filter((x) => !GENERATED.includes(x.name)).map((x) => x.text), ...tail]
+  return parts.filter(Boolean).join('\n\n') + '\n'
+}
+
+/** sil update. Brings a project that ran an older sil init up to the installed version:
+ *   1. the generated sections of the entry documents (Notation · Running a call · Subagents) are replaced; the user's sections stay
+ *   2. the Migration section leaves SILMARI.md; if a start file still asks the migration question, .sil/migration.md is written and the line points at it
+ *   3. the update notes newer than the recorded version go to .sil/updates/, with one line in the start files asking the agent to apply them
+ *   4. the installed version is recorded in .sil/config.yaml
+ *  Running it again changes nothing. */
+export function update(dir: string): number {
+  const root = findProjectRoot(resolve(dir))
+  if (!root) { process.stderr.write(`sil update: no .sil/ found above ${resolve(dir)}. Run sil init first.\n`); return 1 }
+  const cfg = readConfig(root), installed = silVersion(), from = cfg.version ?? '0.0.0'
+  let changed = 0
+  for (const rel of cfg.entry) {
+    const p = resolve(root, rel)
+    if (!existsSync(p)) continue
+    const before = readFileSync(p, 'utf8'), after = refreshEntry(before)
+    if (after === null) { process.stdout.write(`Unchanged: ${rel} (no generated sections)\n`); continue }
+    if (after === before) { process.stdout.write(`Unchanged: ${rel}\n`); continue }
+    writeFileSync(p, after); changed++; process.stdout.write(`Updated: ${rel} (Notation · Running a call · Subagents refreshed${before.includes('\n## Migration') ? ' · Migration moved to ' + MIGRATION_PATH : ''})\n`)
+  }
+  // The migration question: an old line said "the Migration section of SILMARI.md"; that section is gone, so the line points at the file
+  let asking = false
+  for (const f of AGENT_FILES) {
+    const p = resolve(root, f)
+    if (!hasLine(p, MIGRATE_PREFIX)) continue
+    asking = true
+    const lines = readFileSync(p, 'utf8').split('\n'), i = lines.findIndex((l) => l.startsWith(MIGRATE_PREFIX))
+    if (lines[i] !== MIGRATE) { lines[i] = MIGRATE; writeFileSync(p, lines.join('\n')); changed++; process.stdout.write(`Updated: ${f} (migration line points at ${MIGRATION_PATH})\n`) }
+  }
+  if (asking && !existsSync(resolve(root, MIGRATION_PATH))) { writeMigrationDoc(root); changed++ }
+  // Notes for the versions between the recorded one and this one
+  const pending = Object.keys(UPDATE_NOTES).filter((v) => compareVersions(v, from) > 0 && compareVersions(v, installed) <= 0).sort(compareVersions)
+  if (pending.length) {
+    mkdirSync(resolve(root, UPDATES_DIR), { recursive: true })
+    for (const v of pending) { writeFileSync(resolve(root, UPDATES_DIR, `${v}.md`), UPDATE_NOTES[v]); process.stdout.write(`Created: ${UPDATES_DIR}/${v}.md\n`); changed++ }
+    for (const f of AGENT_FILES) {
+      const p = resolve(root, f)
+      if (!existsSync(p) || hasLine(p, UPDATE_PREFIX)) continue
+      appendFileSync(p, `${UPDATE_LINE}\n`); process.stdout.write(`Appended: ${f} (update notes prompt)\n`)
+    }
+  }
+  // Record the version: replace the line or add it
+  const cp = resolve(root, CONFIG_PATH)
+  const text = existsSync(cp) ? readFileSync(cp, 'utf8') : ''
+  if (cfg.version !== installed) {
+    const line = `version: ${installed}        # the silmari that wrote SILMARI.md and this file. \`sil update\` refreshes them and records the new version`
+    const next = /^version:.*$/m.test(text) ? text.replace(/^version:.*$/m, line) : text.replace(/\n?$/, '\n') + line + '\n'
+    writeFileSync(cp, next); changed++; process.stdout.write(`Recorded: ${CONFIG_PATH} version ${installed}${cfg.version ? ` (was ${cfg.version})` : ''}\n`)
+  }
+  process.stdout.write(changed ? `Done: ${installed}${pending.length ? `. The agent applies ${UPDATES_DIR}/ at the start of the next session` : ''}\n` : `Up to date: ${installed}\n`)
   return 0
 }

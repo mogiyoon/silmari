@@ -1,20 +1,13 @@
 #!/usr/bin/env node
-// sil. Design §7.7. init · lint · view.
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+// sil. Design §7.7. init · update · migrate · lint · view · run.
 import { isMainThread } from 'node:worker_threads'
 import { findProjectRoot } from '@silmari/core'
 import { lint } from './lint.ts'
-import { init } from './init.ts'
+import { init, update, migrate } from './init.ts'
+import { silVersion as version } from './version.ts'
 import { view } from './view.ts'
 import { run } from './run.ts'
 
-// The bundle gets the version from package.json at build time (esbuild define); the source run reads the file
-declare const __SIL_VERSION__: string | undefined
-const version = (): string => {
-  if (typeof __SIL_VERSION__ === 'string') return __SIL_VERSION__
-  try { return (JSON.parse(readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8')) as { version: string }).version } catch { return '0.0.0' }
-}
 
 // Arguments: `--key=value`, `--key value`, or a bare `--flag`. Short forms -h and -v
 const VALUE_FLAGS = new Set(['entry', 'lang', 'port', 'out'])
@@ -44,9 +37,15 @@ const usage = `sil <command> [dir] [options]
   init [dir]        Creates .sil/config.yaml and SILMARI.md (entry point with a notation summary). Creates the agent start
                     files that are missing (CLAUDE.md · AGENTS.md · GEMINI.md · .github/copilot-instructions.md) and appends
                     a SILMARI.md call to the existing ones; if the project already has md files, also a line that asks
-                    "Start the silmari migration?". Generated text is English; the user's language (--lang, else the locale) is
-                    recorded in the config and agents are told to write in it.
+                    "Start the silmari migration?" and writes the migration rules to .sil/migration.md. Generated text is English;
+                    the user's language (--lang, else the locale) is recorded in the config and agents are told to write in it.
                       --entry=file.md   entry point        --lang=ko   language the agents write in
+  update [dir]      Brings a project that ran an older sil init up to this version: refreshes the generated sections of
+                    SILMARI.md (the Flow section and your own sections stay), writes the notes on notation changes since the
+                    recorded version to .sil/updates/ with a line in the start files asking the agent to apply and delete them,
+                    and records the version in .sil/config.yaml. Running it again changes nothing
+  migrate [dir]     Writes .sil/migration.md again and puts the "Start the silmari migration?" line back into the start files,
+                    to move documents to the notation later
   lint [dir]        Checks the md files and prints the problems. Exit code 0; with --strict, 1 when there is an error.
                     Without dir: the nearest folder above the current one that has .sil/, else the current folder
                       --strict          exit 1 on error    --json      print the graph and diagnostics as JSON
@@ -70,6 +69,8 @@ else if (flags.has('version') || cmd === 'version') { process.stdout.write(`${ve
 else if (flags.has('help') || cmd === 'help') { process.stdout.write(usage) }
 else switch (cmd) {
   case 'init': process.exitCode = init(args[0] ?? '.', { entry: opt('entry'), lang: opt('lang') }); break
+  case 'update': process.exitCode = update(args[0] ?? '.'); break
+  case 'migrate': process.exitCode = migrate(args[0] ?? '.'); break
   case 'lint': lint(project(), { strict: flags.has('strict'), json: flags.has('json') }).then((c) => { process.exitCode = c }); break
   case 'view': view(project(), { port: opt('port') ? Number(opt('port')) : undefined, out: opt('out'), open: !flags.has('no-open') }).then((c) => { process.exitCode = c }); break
   default: process.stdout.write(usage); process.exitCode = cmd ? 2 : 0
