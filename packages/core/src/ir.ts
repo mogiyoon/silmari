@@ -1,7 +1,8 @@
 // The IR maps one-to-one to test/fixtures/after/graph.example.json. Design document §3.
 // The CLI, viewer, and extension share only these types as their contract.
 
-export type NodeKind = 'task' | 'doc' | 'ghost'
+/** file: a linked file that is not Markdown (json, log, …) or a template link's stand-in. Shown in the graph, checked for existence, never parsed. */
+export type NodeKind = 'task' | 'doc' | 'file' | 'ghost'
 export type EdgeType = 'call' | 'mention' | 'ref'
 export type Severity = 'error' | 'warning' | 'info'
 

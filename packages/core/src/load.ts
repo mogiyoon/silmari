@@ -7,6 +7,7 @@ import { cpus } from 'node:os'
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads'
 import ignore from 'ignore'
 import { parseDoc, type Doc } from './parse.ts'
+import { templateRegex } from './graph.ts'
 
 /** Always excluded. The config cannot include these paths. They are not documents for the graph. */
 export const ALWAYS_EXCLUDE = ['.git', 'node_modules', '.sil', '.claude/worktrees']
@@ -26,6 +27,27 @@ export function findProjectRoot(start: string, stop?: string): string | null {
 
 /** Used with loadDir. Checks whether files outside the scan exist for buildGraph(docs, { exists }). */
 export const existsIn = (root: string) => (rel: string) => existsSync(join(root, rel))
+
+/** Used with loadDir. Lists the files a template link matches for buildGraph(docs, { glob }): each `{{>name}}` stands for one path segment.
+ *  Walks the pattern segment by segment, so only the folders it names are read. Returns project-relative paths in name order. */
+export const globIn = (root: string) => (pattern: string): string[] => {
+  let cur = ['']
+  for (const seg of pattern.split('/')) {
+    const next: string[] = []
+    if (!/\{\{>/.test(seg)) { for (const c of cur) { const p = c ? `${c}/${seg}` : seg; if (existsSync(join(root, p))) next.push(p) } }
+    else {
+      const re = templateRegex(seg)
+      for (const c of cur) {
+        const dir = join(root, c)
+        if (!existsSync(dir) || !statSync(dir).isDirectory()) continue
+        for (const f of readdirSync(dir).sort()) if (re.test(f)) next.push(c ? `${c}/${f}` : f)
+      }
+    }
+    cur = next
+    if (!cur.length) break
+  }
+  return cur
+}
 
 /** Parsed documents kept between loads, keyed by path. A file whose mtime and size are unchanged is not read or parsed again.
  *  After loadDir, `changed` says whether anything differed from the previous load (a file parsed, added or removed) */

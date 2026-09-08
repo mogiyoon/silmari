@@ -4,7 +4,7 @@
 import type { Graph, Edge as SilEdge, Node as SilNode } from '@silmari/core'
 
 // Base heights fit a button bar plus a one-line title and file name. Titles wrap, so the viewer reports real heights (LayoutOpts.heights)
-export const SIZE = { task: { w: 200, h: 84 }, doc: { w: 170, h: 76 }, ghost: { w: 170, h: 56 } } as const
+export const SIZE = { task: { w: 200, h: 84 }, doc: { w: 170, h: 76 }, file: { w: 170, h: 56 }, ghost: { w: 170, h: 56 } } as const
 /** Heading box inside an expanded node */
 export const SEC_W = 260, SEC_H = 66, SEC_GAP = 8, OPEN_HEAD = 70, OPEN_PAD = 12
 const LINE_H = 14, PAD = 8, GAP = 6
@@ -19,7 +19,7 @@ export function secHeight(h: { text: string; level: number; subagent: boolean })
 }
 /** Node size. Collapsed size is fixed by kind. Expanded size grows with the heading boxes */
 export function nodeSize(n: SilNode, open: boolean): { w: number; h: number } {
-  if (!open || n.kind === 'ghost') return SIZE[n.kind]
+  if (!open || n.kind === 'ghost' || n.kind === 'file') return SIZE[n.kind]
   const stack = n.headings.length ? n.headings.reduce((s, h) => s + secHeight(h) + SEC_GAP, 0) - SEC_GAP : SEC_PADV + SEC_LINE
   return { w: SEC_W + OPEN_PAD * 2, h: OPEN_HEAD + stack + OPEN_PAD }
 }
@@ -339,8 +339,10 @@ export function entryView(g: Graph, visible: Set<string>): EntryView | null {
   const entry = (g.entry ?? []).find((id) => visible.has(id))
   if (!entry) return null
   const kind = new Map(g.nodes.map((n) => [n.id, n.kind]))
+  // A registration is a plain link (`[Feature work](flow.md)` in SILMARI.md's Flow section). A link that carries values is a call: the
+  // entry document is then itself a flow, its steps are not flows of their own, and the connectivity view shows the whole thing
   const starters: string[] = []
-  for (const e of g.edges) if (e.from === entry && e.to !== entry && visible.has(e.to) && kind.get(e.to) === 'task' && !starters.includes(e.to)) starters.push(e.to)
+  for (const e of g.edges) if (e.from === entry && e.to !== entry && e.type !== 'call' && visible.has(e.to) && kind.get(e.to) === 'task' && !starters.includes(e.to)) starters.push(e.to)
   if (!starters.length) return null
   const called = new Set(g.edges.filter((e) => e.from !== e.to && visible.has(e.from)).map((e) => e.to))
   const startFiles = [...new Set(g.edges.filter((e) => e.to === entry && e.from !== entry && visible.has(e.from) && !called.has(e.from)).map((e) => e.from))]

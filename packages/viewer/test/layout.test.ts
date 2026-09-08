@@ -182,6 +182,10 @@ test('entry view: the entry document registers flows by linking them; start file
   assert.equal(entryView(noReg, new Set(noReg.nodes.map((n) => n.id))), null)
   // A hidden kind drops its starters: with tasks off there is nothing to start from
   assert.equal(entryView(g, new Set([...all].filter((id) => g.nodes.find((n) => n.id === id)!.kind !== 'task'))), null)
+  // A registration is a plain link. When the entry document calls its tasks with values it is itself a flow, not an index of flows:
+  // no entry view, and the connectivity view shows the whole flow (so its steps never become separate flow boxes)
+  const asFlow = buildGraph(new Map([['flow.md', docs.get('a.md')!], ['c.md', docs.get('c.md')!]]), { entry: ['a.md'] })
+  assert.equal(entryView(asFlow, new Set(asFlow.nodes.map((n) => n.id))), null)
   // The start file is placed before the entry point, and the entry point one column to its right
   const sk = skeleton(g, [...all])
   assert.equal(sk.rank.get('CLAUDE.md'), 0); assert.equal(sk.rank.get('SILMARI.md'), 1); assert.equal(sk.rank.get('a.md'), 2)

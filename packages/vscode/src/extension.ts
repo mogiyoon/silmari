@@ -1,7 +1,7 @@
 // silmari VS Code extension. S11 (configurationDefaults is in package.json) + S12 (Diagnostic) + graph webview.
 import * as vscode from 'vscode'
-import { readFileSync, existsSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative, sep } from 'node:path'
+import { readFileSync, existsSync, writeFileSync, statSync } from 'node:fs'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { findProjectRoot } from '@silmari/core'
 import { graphWithOverride, byFile, toLineCol, yieldToVscode } from './diagnose.ts'
 
@@ -13,6 +13,17 @@ let timer: ReturnType<typeof setTimeout> | undefined
 const SEV = { error: vscode.DiagnosticSeverity.Error, warning: vscode.DiagnosticSeverity.Warning, info: vscode.DiagnosticSeverity.Information } as const
 
 function readText(p: string): string | null { try { return readFileSync(p, 'utf8') } catch { return null } }
+/** A project file as text for the graph's side panel. Same limits as `sil view`: inside the root, under 2 MB, no NUL byte in the first 8 KB */
+function readProjectFile(root: string | null, rel: string): { text?: string; error?: string } {
+  if (!root) return { error: 'No project root' }
+  const abs = resolve(root, rel)
+  if (!abs.startsWith(resolve(root) + sep)) return { error: 'path must be inside the root' }
+  if (!existsSync(abs) || statSync(abs).isDirectory()) return { error: `File not found: ${rel}` }
+  const buf = readFileSync(abs)
+  if (buf.length > 2 * 1024 * 1024) return { error: 'File is larger than 2 MB' }
+  if (buf.subarray(0, 8192).includes(0)) return { error: 'Binary file' }
+  return { text: buf.toString('utf8') }
+}
 
 /** The project the file belongs to: the nearest folder above it with `.sil/`, never above the workspace folder. Without one, the
  *  workspace folder itself. So a silmari project inside a bigger repository (even one the repository's .gitignore hides) is scanned as its own */
@@ -72,10 +83,12 @@ function openGraph(context: vscode.ExtensionContext) {
   const layFile = root ? join(root, '.sil', 'layout.json') : null
   const lay = layFile && existsSync(layFile) ? readFileSync(layFile, 'utf8').replace(/</g, '\\u003c') : 'null'
   // Layout save path: webview → extension → .sil/layout.json (only when .sil exists).
-  panel.webview.onDidReceiveMessage((m: { type?: string; saved?: unknown }) => {
+  panel.webview.onDidReceiveMessage((m: { type?: string; saved?: unknown; id?: number; path?: string }) => {
     if (m?.type === 'layout' && layFile && existsSync(join(root!, '.sil'))) { try { writeFileSync(layFile, JSON.stringify(m.saved)) } catch { /* */ } }
+    // The side panel shows a linked file (json, log …) as text. Inside the root only; binary or oversized files are refused, as in sil view
+    if (m?.type === 'readFile' && typeof m.path === 'string') panel?.webview.postMessage({ type: 'file', id: m.id, ...readProjectFile(root ?? null, m.path) })
   })
-  panel.webview.html = html.replace('</head>', `<script>window.__SIL_GRAPH__=null;window.__SIL_LANG__=${JSON.stringify(vscode.env.language)};window.__SIL_ROOT__=${JSON.stringify(root ?? '')};window.__SIL_LAYOUT__=${lay};(function(){var v=acquireVsCodeApi();window.__SIL_SAVE_LAYOUT__=function(s){v.postMessage({type:'layout',saved:s})}})();window.addEventListener('message',e=>{if(e.data&&e.data.type==='graph'){window.__SIL_LAST__=e.data.graph;window.__SIL_SET__&&window.__SIL_SET__(e.data.graph)}})</script></head>`)
+  panel.webview.html = html.replace('</head>', `<script>window.__SIL_GRAPH__=null;window.__SIL_LANG__=${JSON.stringify(vscode.env.language)};window.__SIL_ROOT__=${JSON.stringify(root ?? '')};window.__SIL_LAYOUT__=${lay};(function(){var v=acquireVsCodeApi();window.__SIL_SAVE_LAYOUT__=function(s){v.postMessage({type:'layout',saved:s})};var n=0,w={};window.__SIL_READ_FILE__=function(p){return new Promise(function(r){var i=++n;w[i]=r;v.postMessage({type:'readFile',id:i,path:p})})};window.addEventListener('message',function(e){var d=e.data;if(d&&d.type==='file'&&w[d.id]){w[d.id]({text:d.text,error:d.error});delete w[d.id]}})})();window.addEventListener('message',e=>{if(e.data&&e.data.type==='graph'){window.__SIL_LAST__=e.data.graph;window.__SIL_SET__&&window.__SIL_SET__(e.data.graph)}})</script></head>`)
   panel.onDidDispose(() => { panel = undefined })
   refresh(vscode.window.activeTextEditor?.document)
 }
