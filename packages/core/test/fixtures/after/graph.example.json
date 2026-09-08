@@ -4,7 +4,7 @@
     "files": 8,
     "nodes": 9,
     "edges": 14,
-    "diagnostics": 2,
+    "diagnostics": 4,
     "nodesByKind": {
       "doc": 2,
       "ghost": 1,
@@ -16,7 +16,8 @@
       "ref": 5
     },
     "diagnosticsBySeverity": {
-      "error": 2
+      "error": 2,
+      "info": 2
     }
   },
   "nodes": [
@@ -63,10 +64,10 @@
           "text": "1. Research",
           "line": 5,
           "subagent": true,
-          "body": "For each target file, call [research](research.md) with {{>target}} and receive {{<findings}}.",
+          "body": "For each target file, call [research](research.md) with {{>target}} and receive {{<findings}}. Tools {{+read}}, model {{#fast}}.",
           "range": {
             "start": 180,
-            "end": 274
+            "end": 308
           }
         },
         {
@@ -76,8 +77,8 @@
           "subagent": false,
           "body": "Call [plan](plan.md) with {{>findings}} and receive {{<plan}}.",
           "range": {
-            "start": 288,
-            "end": 350
+            "start": 322,
+            "end": 384
           }
         },
         {
@@ -87,8 +88,8 @@
           "subagent": false,
           "body": "Call [implement](implement.md) with {{>plan}} and receive {{<changed-files}}.",
           "range": {
-            "start": 369,
-            "end": 446
+            "start": 403,
+            "end": 480
           }
         },
         {
@@ -98,8 +99,8 @@
           "subagent": true,
           "body": "Call [review](review.md) with {{>changed-files}} and receive {{<comments}}.",
           "range": {
-            "start": 481,
-            "end": 556
+            "start": 515,
+            "end": 590
           }
         },
         {
@@ -109,8 +110,8 @@
           "subagent": false,
           "body": "Call [implement](implement.md) with {{>comments}} and receive {{<changed-files}} again. Repeat until there are no comments.",
           "range": {
-            "start": 587,
-            "end": 710
+            "start": 621,
+            "end": 744
           }
         },
         {
@@ -120,13 +121,13 @@
           "subagent": false,
           "body": "Run [wrap-up](wrap-up.md).",
           "range": {
-            "start": 727,
-            "end": 753
+            "start": 761,
+            "end": 787
           }
         }
       ],
       "contract": null,
-      "hash": "305513bf244280cba323122225f928c979db1522"
+      "hash": "3fa0ff02b7a59adc479cc997135fd8a1efa52ce9"
     },
     {
       "id": "implement.md",
@@ -152,9 +153,10 @@
           "subagent": false,
           "body": "- plan\n- comments",
           "range": {
-            "start": 122,
-            "end": 139
-          }
+            "start": 127,
+            "end": 144
+          },
+          "contract": "in"
         },
         {
           "level": 2,
@@ -163,8 +165,8 @@
           "subagent": false,
           "body": "Work through the items in the order given. Verify after each item and report it in one line.\nFollow the [coding rules](coding-rules.md). If a change outside the plan is needed, write the reason before doing it.\nWhen everything is done, call [review](review.md) with {{>changed-files}} and receive {{<comments}}; if there are comments, apply them.",
           "range": {
-            "start": 151,
-            "end": 497
+            "start": 156,
+            "end": 502
           }
         },
         {
@@ -174,9 +176,10 @@
           "subagent": false,
           "body": "- changed-files — one line per changed file: path and what changed\n- comments — what the review left at the end. \"pass\" when there is nothing",
           "range": {
-            "start": 510,
-            "end": 655
-          }
+            "start": 520,
+            "end": 665
+          },
+          "contract": "out"
         }
       ],
       "contract": {
@@ -189,7 +192,7 @@
           "comments"
         ]
       },
-      "hash": "21706bd1bcd8e6b8432e3ea659838d4881e97d1e"
+      "hash": "87a3fe78ae7c4da3dc6770c6940670eb0d274e45"
     },
     {
       "id": "plan.md",
@@ -215,9 +218,10 @@
           "subagent": false,
           "body": "- findings",
           "range": {
-            "start": 67,
-            "end": 77
-          }
+            "start": 72,
+            "end": 82
+          },
+          "contract": "in"
         },
         {
           "level": 2,
@@ -226,8 +230,8 @@
           "subagent": false,
           "body": "Order by dependency. No more than 5 items. For each item write what / where / how to verify.\nNew features go where the [structure](structure.md#extension) says they go.",
           "range": {
-            "start": 89,
-            "end": 257
+            "start": 94,
+            "end": 262
           }
         },
         {
@@ -237,9 +241,10 @@
           "subagent": false,
           "body": "- plan — the list in the format above",
           "range": {
-            "start": 270,
-            "end": 309
-          }
+            "start": 280,
+            "end": 319
+          },
+          "contract": "out"
         }
       ],
       "contract": {
@@ -250,7 +255,7 @@
           "plan"
         ]
       },
-      "hash": "fe31fbba5c35d9e1d7e72f6ce3300be47cbb84ac"
+      "hash": "fd5fd613ffde41759705ab9e81ee8477093fd157"
     },
     {
       "id": "research.md",
@@ -274,11 +279,12 @@
           "text": "Inputs",
           "line": 5,
           "subagent": false,
-          "body": "- target",
+          "body": "- target (path) — the file to read",
           "range": {
-            "start": 129,
-            "end": 137
-          }
+            "start": 134,
+            "end": 170
+          },
+          "contract": "in"
         },
         {
           "level": 2,
@@ -287,8 +293,8 @@
           "subagent": false,
           "body": "Read the file and look for places that disagree with the [structure](structure.md#layers). Where unsure, write \"unsure\".",
           "range": {
-            "start": 149,
-            "end": 269
+            "start": 182,
+            "end": 302
           }
         },
         {
@@ -298,9 +304,10 @@
           "subagent": false,
           "body": "- findings — three lines: what the file does / the `file:line` to change / whether unsure",
           "range": {
-            "start": 282,
-            "end": 373
-          }
+            "start": 320,
+            "end": 411
+          },
+          "contract": "out"
         }
       ],
       "contract": {
@@ -309,9 +316,12 @@
         ],
         "outputs": [
           "findings"
-        ]
+        ],
+        "types": {
+          "target": "path"
+        }
       },
-      "hash": "b6966fdb859701803ef4a0f2ea82269c445c4190"
+      "hash": "dd3090563167e26b9fd07f152caffdec6df74841"
     },
     {
       "id": "review-criteria.md",
@@ -346,9 +356,10 @@
           "subagent": false,
           "body": "- changed-files",
           "range": {
-            "start": 63,
-            "end": 78
-          }
+            "start": 68,
+            "end": 83
+          },
+          "contract": "in"
         },
         {
           "level": 2,
@@ -357,8 +368,8 @@
           "subagent": false,
           "body": "Read the changed files and check them against the [coding rules](coding-rules.md) and the [review criteria](review-criteria.md). When there is nothing to say, write only \"pass\".",
           "range": {
-            "start": 90,
-            "end": 267
+            "start": 95,
+            "end": 272
           }
         },
         {
@@ -368,8 +379,8 @@
           "subagent": false,
           "body": "Call [implement](implement.md) with {{>comments}} to get them fixed. Implement calls review again, so the documents form a cycle — the viewer marks this edge as one.",
           "range": {
-            "start": 319,
-            "end": 486
+            "start": 324,
+            "end": 491
           }
         },
         {
@@ -379,9 +390,10 @@
           "subagent": false,
           "body": "- comments — `file:line` / what is wrong / how to fix it",
           "range": {
-            "start": 499,
-            "end": 557
-          }
+            "start": 509,
+            "end": 567
+          },
+          "contract": "out"
         },
         {
           "level": 2,
@@ -390,8 +402,8 @@
           "subagent": false,
           "body": "`review-criteria.md` does not exist. `L-N01` catches it and it stays as a ghost node.",
           "range": {
-            "start": 578,
-            "end": 663
+            "start": 588,
+            "end": 673
           }
         }
       ],
@@ -403,7 +415,7 @@
           "comments"
         ]
       },
-      "hash": "089a52d05957877bd3a87f61f58781f6c71bac62"
+      "hash": "d23a81bf4a789a35cac96a10f3cdbedb2e80875f"
     },
     {
       "id": "structure.md",
@@ -457,39 +469,39 @@
         {
           "level": 1,
           "text": "Wrap up",
-          "line": 1,
+          "line": 5,
           "subagent": false,
           "body": "Takes nothing from the earlier steps. Runs once at the end of the flow.",
           "range": {
-            "start": 11,
-            "end": 82
+            "start": 37,
+            "end": 108
           }
         },
         {
           "level": 2,
           "text": "Steps",
-          "line": 5,
+          "line": 9,
           "subagent": false,
           "body": "Go through the documents in this repository and find descriptions that disagree with the code. Follow the [structure](structure.md#rollback) for the rollback procedure. Do not fix anything; report only `file:line` and a one-line reason.",
           "range": {
-            "start": 94,
-            "end": 330
+            "start": 120,
+            "end": 356
           }
         },
         {
           "level": 2,
           "text": "Seeded problem",
-          "line": 9,
+          "line": 13,
           "subagent": false,
           "body": "The `#rollback` anchor does not exist in `structure.md`. `L-N09` catches it.",
           "range": {
-            "start": 351,
-            "end": 427
+            "start": 377,
+            "end": 453
           }
         }
       ],
       "contract": null,
-      "hash": "bcd8d48dcb2311511fc088dcef7497e135ff3f96"
+      "hash": "c117400436a65fe0347a45392ca7f231beeafcf6"
     }
   ],
   "edges": [
@@ -512,7 +524,11 @@
       "range": {
         "start": 207,
         "end": 230
-      }
+      },
+      "tools": [
+        "read"
+      ],
+      "model": "fast"
     },
     {
       "from": "flow.md",
@@ -531,8 +547,8 @@
       ],
       "isolated": false,
       "range": {
-        "start": 293,
-        "end": 308
+        "start": 327,
+        "end": 342
       }
     },
     {
@@ -552,8 +568,8 @@
       ],
       "isolated": false,
       "range": {
-        "start": 374,
-        "end": 399
+        "start": 408,
+        "end": 433
       }
     },
     {
@@ -573,8 +589,8 @@
       ],
       "isolated": true,
       "range": {
-        "start": 486,
-        "end": 505
+        "start": 520,
+        "end": 539
       }
     },
     {
@@ -594,8 +610,8 @@
       ],
       "isolated": false,
       "range": {
-        "start": 592,
-        "end": 617
+        "start": 626,
+        "end": 651
       }
     },
     {
@@ -611,8 +627,8 @@
       "returns": [],
       "isolated": false,
       "range": {
-        "start": 731,
-        "end": 752
+        "start": 765,
+        "end": 786
       }
     },
     {
@@ -628,8 +644,8 @@
       "returns": [],
       "isolated": false,
       "range": {
-        "start": 255,
-        "end": 286
+        "start": 260,
+        "end": 291
       }
     },
     {
@@ -649,8 +665,8 @@
       ],
       "isolated": false,
       "range": {
-        "start": 392,
-        "end": 411
+        "start": 397,
+        "end": 416
       }
     },
     {
@@ -666,8 +682,8 @@
       "returns": [],
       "isolated": false,
       "range": {
-        "start": 208,
-        "end": 243
+        "start": 213,
+        "end": 248
       },
       "anchor": "extension"
     },
@@ -684,8 +700,8 @@
       "returns": [],
       "isolated": false,
       "range": {
-        "start": 206,
-        "end": 238
+        "start": 239,
+        "end": 271
       },
       "anchor": "layers"
     },
@@ -702,8 +718,8 @@
       "returns": [],
       "isolated": false,
       "range": {
-        "start": 140,
-        "end": 171
+        "start": 145,
+        "end": 176
       }
     },
     {
@@ -719,8 +735,8 @@
       "returns": [],
       "isolated": false,
       "range": {
-        "start": 180,
-        "end": 217
+        "start": 185,
+        "end": 222
       }
     },
     {
@@ -738,15 +754,15 @@
       "returns": [],
       "isolated": false,
       "range": {
-        "start": 324,
-        "end": 349
+        "start": 329,
+        "end": 354
       }
     },
     {
       "from": "wrap-up.md",
       "to": "structure.md",
       "type": "ref",
-      "line": 7,
+      "line": 11,
       "under": [
         "Wrap up",
         "Steps"
@@ -755,8 +771,8 @@
       "returns": [],
       "isolated": false,
       "range": {
-        "start": 200,
-        "end": 234
+        "start": 226,
+        "end": 260
       },
       "anchor": "rollback"
     }
@@ -768,18 +784,34 @@
       "where": "review.md:10",
       "message": "Linked file not found: review-criteria.md",
       "range": {
-        "start": 180,
-        "end": 217
+        "start": 185,
+        "end": 222
       }
     },
     {
       "code": "L-N09",
       "severity": "error",
-      "where": "wrap-up.md:7",
+      "where": "wrap-up.md:11",
       "message": "Anchor not found in the target document: structure.md#rollback",
       "range": {
-        "start": 200,
-        "end": 234
+        "start": 226,
+        "end": 260
+      }
+    },
+    {
+      "code": "L-N23",
+      "severity": "info",
+      "where": "flow.md",
+      "message": "A sent value is neither received from a call nor declared in this document's contract: target"
+    },
+    {
+      "code": "L-N25",
+      "severity": "info",
+      "where": "flow.md:19",
+      "message": "Subagent call names no {{+tools}} or {{#model}}; it runs with whatever the caller passes",
+      "range": {
+        "start": 520,
+        "end": 539
       }
     }
   ]

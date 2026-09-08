@@ -1,7 +1,7 @@
 // Builds a graph and diagnostics from documents. Design document §3 and Appendix A.
 // Unmarked Markdown files stay quiet. L-G01 runs only when there is a call edge. L-G06 checks only calls. L-N05 and L-N06 check only task nodes.
 import { posix as path } from 'node:path'
-import type { Graph, Node, Edge, Diagnostic } from './ir.ts'
+import type { Graph, Node, Edge, Diagnostic, Contract } from './ir.ts'
 import type { Doc, Link } from './parse.ts'
 import { isConventionalEntry } from './config.ts'
 
@@ -21,6 +21,13 @@ export function resolve(src: string, target: string): Resolved {
 const fmt = (xs: string[]) => `[${xs.map((x) => `'${x}'`).join(', ')}]`
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const hasData = (l: Link) => l.sends.length + l.returns.length > 0
+const hasContract = (d: Doc) => d.contractIn.length + d.contractOut.length > 0
+const contractOf = (d: Doc): Contract | null => {
+  if (!hasContract(d)) return null
+  const c: Contract = { inputs: d.contractIn, outputs: d.contractOut }
+  if (Object.keys(d.contractTypes).length) c.types = d.contractTypes
+  return c
+}
 
 export interface BuildOptions {
   /** Checks whether a file excluded from the scan, such as by .gitignore, exists on disk. If it exists, it is an empty doc node, not a ghost. */
@@ -35,22 +42,23 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
     const r = resolve(d.rel, l.target)
     if (r.kind === 'md' && hasData(l)) calledWithData.add(r.rel!)
   }
+  // A task: it calls with values, is called with values, or declares a contract. `sil: type` in the frontmatter overrides the guess.
   const isTask = (d: Doc) => {
     const t = d.fm['type']
     if (t === 'task' || t === 'doc') return t === 'task'
-    return d.links.some(hasData) || calledWithData.has(d.rel) || d.contractIn.length + d.contractOut.length > 0 || d.hasTaskHead
+    return d.links.some(hasData) || calledWithData.has(d.rel) || hasContract(d)
   }
 
   const nodes = new Map<string, Node>()
   const edges: Edge[] = []
   const diags: Diagnostic[] = []
   for (const d of docs.values()) {
-    nodes.set(d.rel, { id: d.rel, kind: isTask(d) ? 'task' : 'doc', title: d.title ?? d.rel, desc: d.desc, headings: d.headings,
-      contract: d.contractIn.length + d.contractOut.length ? { inputs: d.contractIn, outputs: d.contractOut } : null,
-      hash: d.hash, ...(d.agent ? { agent: d.agent } : {}) })
+    nodes.set(d.rel, { id: d.rel, kind: isTask(d) ? 'task' : 'doc', title: d.title ?? d.rel, desc: d.desc, headings: d.headings, contract: contractOf(d), hash: d.hash })
     const task = nodes.get(d.rel)!.kind === 'task'
-    diags.push(...d.diags.filter((x) => task || !(x.code === 'L-N05' || x.code === 'L-N06')))
+    for (const x of d.diags) if (task || !(x.code === 'L-N05' || x.code === 'L-N06')) diags.push(x)
   }
+  // Tool sets per called file, to spot a file that is called with different tools from different places (L-N24)
+  const toolSets = new Map<string, Map<string, string>>()
   for (const d of docs.values()) for (const l of d.links) {
     const r = resolve(d.rel, l.target)
     if (r.kind !== 'md') continue
@@ -70,9 +78,11 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
     if (tgt.kind === 'doc' && data) diags.push({ code: 'L-N14', severity: 'warning', where, message: `Data attached to a reference document: ${l.target}`, range })
     const e: Edge = { from: d.rel, to: rel, type, line: l.line, under: l.under, sends: l.sends, returns: l.returns, isolated: l.isolated, range: l.range }
     if (r.anchor) e.anchor = r.anchor
+    if (l.tools.length) e.tools = l.tools
+    if (l.model) e.model = l.model
     edges.push(e)
     const c = docs.get(rel)
-    if (tgt.kind === 'task' && c && c.contractIn.length + c.contractOut.length) {
+    if (tgt.kind === 'task' && c && hasContract(c)) {
       const sent = [...new Set(l.sends)]
       const notIn = sent.filter((x) => !c.contractIn.includes(x)).sort(cmp)
       if (c.contractIn.length && sent.length && notIn.length)
@@ -81,7 +91,21 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
       if (c.contractOut.length && l.returns.length && notOut.length)
         diags.push({ code: 'L-C02', severity: 'warning', where, message: `Receives values that are not in the outputs ${fmt(c.contractOut)} of ${rel}: ${fmt(notOut)}`, range })
     }
+    // A file that is called with values but declares nothing cannot be checked. The contract belongs in the called file (Migration rule 2)
+    if (type === 'call' && c && !hasContract(c) && data)
+      diags.push({ code: 'L-N22', severity: 'info', where, message: `${rel} is called with values but declares no {{>…}} / {{<…}} contract, so the names cannot be checked`, range })
+    // Tools and model apply to subagent runs only
+    if (type === 'call' && !l.isolated && (l.tools.length || l.model))
+      diags.push({ code: 'L-N26', severity: 'warning', where, message: `{{+…}} / {{#…}} on a call that is not a subagent step have no effect. Add a (( )) label to the heading, or remove them`, range })
+    if (type === 'call' && l.isolated && !l.tools.length && !l.model)
+      diags.push({ code: 'L-N25', severity: 'info', where, message: `Subagent call names no {{+tools}} or {{#model}}; it runs with whatever the caller passes`, range })
+    if (type === 'call' && l.tools.length) {
+      const sets = toolSets.get(rel) ?? toolSets.set(rel, new Map()).get(rel)!
+      sets.set([...l.tools].sort(cmp).join(', '), where)
+    }
   }
+  for (const [rel, sets] of toolSets) if (sets.size > 1)
+    diags.push({ code: 'L-N24', severity: 'info', where: rel, message: `Called with different tool sets: ${[...sets.keys()].map((s) => `[${s}]`).join(' vs ')}` })
   for (const d of docs.values()) {
     const recv = new Map<string, string[]>()
     const sentNames = new Set<string>()
@@ -97,6 +121,9 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
       // A received value is used if it is sent to the next call or returned by this document as an output.
       else if (!sentNames.has(n) && !d.contractOut.includes(n)) diags.push({ code: 'L-N17', severity: 'info', where: d.rel, message: `A received value is never used: ${n}` })
     }
+    // The mirror of L-N17: a sent value that this document neither receives from a call nor declares in its own contract. Legitimate when the document makes the value itself, so info
+    for (const n of [...sentNames].sort(cmp)) if (!recv.has(n) && !d.contractIn.includes(n) && !d.contractOut.includes(n))
+      diags.push({ code: 'L-N23', severity: 'info', where: d.rel, message: `A sent value is neither received from a call nor declared in this document's contract: ${n}` })
     for (const [rel, ls] of calls) if (ls.length > 1 && ls.slice(1).some((l) => l.under.length <= 1))
       diags.push({ code: 'L-G06', severity: 'warning', where: d.rel, message: `${rel} is called again without a condition. There is no way out` })
   }
@@ -109,8 +136,9 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
     diags.push({ code: 'L-G01', severity: 'warning', where: n.id, message: 'Reference document that nobody links to. A cleanup candidate; never deleted' })
 
   // Remove a diagnostic when its file, the file part of where, uses sil:ignore for that rule.
+  // No spread here: a corpus of tens of thousands of files has more diagnostics than the call stack takes as arguments
   const kept = diags.filter((x) => !docs.get(x.where.replace(/:\d+$/, ''))?.ignores.has(x.code))
-  diags.length = 0; diags.push(...kept)
+  diags.length = 0; for (const x of kept) diags.push(x)
   edges.sort((a, b) => cmp(a.from, b.from) || a.line - b.line || cmp(a.to, b.to))
   diags.sort((a, b) => cmp(a.code, b.code) || cmp(a.where, b.where))
   const sortedNodes = [...nodes.values()].sort((a, b) => cmp(a.id, b.id))

@@ -2,7 +2,7 @@
 
 Read the changed files and find problems.
 
-## Inputs
+## {{>Inputs}}
 - changed-files
 
 ## Steps
@@ -13,7 +13,7 @@ Read the changed files and check them against the [coding rules](coding-rules.md
 
 Call [implement](implement.md) with {{>comments}} to get them fixed. Implement calls review again, so the documents form a cycle — the viewer marks this edge as one.
 
-## Outputs
+## {{<Outputs}}
 - comments — `file:line` / what is wrong / how to fix it
 
 ## Seeded problem

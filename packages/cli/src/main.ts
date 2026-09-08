@@ -7,6 +7,7 @@ import { findProjectRoot } from '@silmari/core'
 import { lint } from './lint.ts'
 import { init } from './init.ts'
 import { view } from './view.ts'
+import { run } from './run.ts'
 
 // The bundle gets the version from package.json at build time (esbuild define); the source run reads the file
 declare const __SIL_VERSION__: string | undefined
@@ -18,6 +19,8 @@ const version = (): string => {
 // Arguments: `--key=value`, `--key value`, or a bare `--flag`. Short forms -h and -v
 const VALUE_FLAGS = new Set(['entry', 'lang', 'port', 'out'])
 const argv = process.argv.slice(2)
+// `sil run` owns its own arguments: everything after the runtime name that is not --step/--send goes to that runtime untouched
+const isRun = argv[0] === 'run'
 const flags = new Map<string, string | true>()
 const args: string[] = []
 for (let i = 0; i < argv.length; i++) {
@@ -50,6 +53,9 @@ const usage = `sil <command> [dir] [options]
   view [dir]        Graph viewer. Starts a local server and opens the browser; redraws when an md file changes
                       --port=4141       next free port if taken       --no-open   do not open the browser
                       --out=file.html   one HTML file, no server
+  run <runtime> --step <flow.md>#<N> --send name=value … [runtime flags]
+                    Starts step N of a flow as a subagent through that runtime's CLI (claude, codex). Checks the call line,
+                    assembles the prompt, passes the flags through, records the run. "sil run --help" lists the runtimes
 
   -h, --help        this text          -v, --version   print the version
 
@@ -59,6 +65,7 @@ Docs: https://github.com/mogiyoon/silmari
 // process.exit() cuts off piped stdout. Use exitCode.
 // Parse workers run this same file (core's loadDirAsync spawns it as a worker thread); in that case the CLI must not run
 if (!isMainThread) { /* worker: core handles it at import time */ }
+else if (isRun) { run(argv.slice(1)).then((c) => { process.exitCode = c }) }
 else if (flags.has('version') || cmd === 'version') { process.stdout.write(`${version()}\n`) }
 else if (flags.has('help') || cmd === 'help') { process.stdout.write(usage) }
 else switch (cmd) {

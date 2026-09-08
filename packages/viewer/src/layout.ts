@@ -31,12 +31,15 @@ export function secPos(n: SilNode, i: number): { x: number; y: number } {
 }
 
 /** One label row. Send/receive uses a small tagged box. Condition and anchor show text only */
-export interface LabelRow { kind: 'send' | 'ret' | 'under' | 'anchor'; tag: string | null; text: string }
+export interface LabelRow { kind: 'send' | 'ret' | 'tools' | 'model' | 'under' | 'anchor'; tag: string | null; text: string }
 const TAG_W = 58
-export function edgeLabelRows(e: SilEdge, tags: { send: string; ret: string } = { send: 'send', ret: 'receive' }): LabelRow[] {
+export function edgeLabelRows(e: SilEdge, tags: { send: string; ret: string; tools: string; model: string } = { send: 'send', ret: 'receive', tools: 'tools', model: 'model' }): LabelRow[] {
   const rows: LabelRow[] = []
   if (e.sends.length) rows.push({ kind: 'send', tag: tags.send, text: e.sends.join(', ') })
   if (e.returns.length) rows.push({ kind: 'ret', tag: tags.ret, text: e.returns.join(', ') })
+  // Tools and model belong to the call, so they sit on the edge label, not on the node (a file may be called with different ones)
+  if (e.tools?.length) rows.push({ kind: 'tools', tag: tags.tools, text: e.tools.join(', ') })
+  if (e.model) rows.push({ kind: 'model', tag: tags.model, text: e.model })
   if (e.under.length > 1) rows.push({ kind: 'under', tag: null, text: e.under[e.under.length - 1] })
   if (e.anchor) rows.push({ kind: 'anchor', tag: null, text: `#${e.anchor}` })
   return rows
@@ -51,13 +54,18 @@ export function labelBox(e: SilEdge): { w: number; h: number } {
   const under = rows.find((r) => r.kind === 'under'), anchor = rows.find((r) => r.kind === 'anchor')
   const head = under || e.isolated ? 22 : 0
   const headW = (under ? textW(under.text) + 8 : 0) + (e.isolated ? 92 : 0)
-  // Three sections: head / anchor / body. A divider separates them
-  const body = rows.filter((r) => r.tag)
+  // Tools and model: one line of solid chips under the head
+  // One row for the model, one for the tools; each row is a label and its chips
+  const runRows = (e.model ? 1 : 0) + (e.tools?.length ? 1 : 0)
+  const run = runRows ? runRows * (LINE_H + 6) + 4 : 0
+  const runW = Math.max(e.model ? TAG_W + 8 + textW(e.model) + 16 : 0, e.tools?.length ? TAG_W + 8 + e.tools.reduce((s, v) => s + textW(v) + 16, 0) : 0)
+  // Sections: head / run chips / anchor / body. A divider separates them
+  const body = rows.filter((r) => r.kind === 'send' || r.kind === 'ret')
   const bodyW = Math.max(0, ...body.map((r) => TAG_W + 8 + r.text.split(', ').reduce((s, v) => s + textW(v) + 12 + 4, 0)))
   const anchorH = anchor ? 20 : 0
   const top = 21, topW = textW('→ ' + e.to) // Top: target md
-  const w = Math.max(topW, headW, bodyW, anchor ? textW(anchor.text) : 0)
-  return { w: w + PAD * 2, h: top + head + anchorH + (body.length ? body.length * (LINE_H + 6) + 4 : 0) + PAD }
+  const w = Math.max(topW, headW, runW, bodyW, anchor ? textW(anchor.text) : 0)
+  return { w: w + PAD * 2, h: top + head + run + anchorH + (body.length ? body.length * (LINE_H + 6) + 4 : 0) + PAD }
 }
 
 export interface Placed {
@@ -171,9 +179,12 @@ export function skeleton(g: Graph, ids: string[]): Skeleton {
     }
     onStack.delete(id)
   }
-  // Roots: place configured entry points in order, then nodes with no incoming edges. Do not hide orphan references
+  // Roots: the files that point at the entry point and that nobody calls (agent start files: CLAUDE.md → SILMARI.md) come first, so the
+  // entry point sits one column to their right; then the configured entry points in order; then nodes with no incoming edges. Do not hide orphan references
   const entry = (g.entry ?? []).filter((id) => idSet.has(id))
-  const roots = [...entry, ...ids.filter((id) => !hasIn.has(id) && !entry.includes(id)).sort((a, b) => (outOf.get(b)?.length ?? 0) - (outOf.get(a)?.length ?? 0) || (a < b ? -1 : 1))]
+  const loose = ids.filter((id) => !hasIn.has(id) && !entry.includes(id)).sort((a, b) => (outOf.get(b)?.length ?? 0) - (outOf.get(a)?.length ?? 0) || (a < b ? -1 : 1))
+  const pre = loose.filter((id) => (outOf.get(id) ?? []).some(({ e }) => entry.includes(e.to)))
+  const roots = [...pre, ...entry, ...loose.filter((id) => !pre.includes(id))]
   for (const r of roots) if (!order.has(r)) visit(r)
   // A cycle-only group (A → B → C → A) has no node without incoming edges. Start with the node called from the caller's latest section:
   // A return call is usually under a later condition heading (`## 지적이 크면`). A forward call is in an earlier section
@@ -314,4 +325,31 @@ function layoutOne(g: Graph, ids: string[], open: Set<string>, sizes: Map<number
   for (const [id, p] of nodes) { const s = size(id); right = Math.max(right, p.x + s.w); bottom = Math.max(bottom, p.y + s.h) }
   for (const [i, p] of labels) { const b = labelOf.get(i)!; right = Math.max(right, p.x + b.w / 2); bottom = Math.max(bottom, p.y + b.h / 2) }
   return { placed: { nodes, labels, cycles: back, sameCol }, box: { w: right - origin.x + MARGIN, h: bottom - origin.y + MARGIN } }
+}
+
+/**
+ * The entry view. The entry document (SILMARI.md) registers flows by linking them; those links are the only starting points here.
+ * `starters` are the task documents the entry document links, in link order. `startFiles` are the documents that link the entry
+ * document and that nobody calls (the agent start files). `downstream(s)` is everything reachable from a starter without passing
+ * through the entry document again. null when there is no visible entry document or it links no task, so the viewer falls back
+ * to the connectivity view. The graph itself is untouched: this is a visibility filter over it.
+ */
+export interface EntryView { entry: string; starters: string[]; startFiles: string[]; downstream: (root: string) => Set<string> }
+export function entryView(g: Graph, visible: Set<string>): EntryView | null {
+  const entry = (g.entry ?? []).find((id) => visible.has(id))
+  if (!entry) return null
+  const kind = new Map(g.nodes.map((n) => [n.id, n.kind]))
+  const starters: string[] = []
+  for (const e of g.edges) if (e.from === entry && e.to !== entry && visible.has(e.to) && kind.get(e.to) === 'task' && !starters.includes(e.to)) starters.push(e.to)
+  if (!starters.length) return null
+  const called = new Set(g.edges.filter((e) => e.from !== e.to && visible.has(e.from)).map((e) => e.to))
+  const startFiles = [...new Set(g.edges.filter((e) => e.to === entry && e.from !== entry && visible.has(e.from) && !called.has(e.from)).map((e) => e.from))]
+  const outOf = new Map<string, string[]>()
+  for (const e of g.edges) if (e.from !== e.to) (outOf.get(e.from) ?? outOf.set(e.from, []).get(e.from)!).push(e.to)
+  const downstream = (root: string) => {
+    const seen = new Set<string>([root]); const queue = [root]
+    while (queue.length) { const x = queue.shift()!; for (const y of outOf.get(x) ?? []) if (y !== entry && visible.has(y) && !seen.has(y)) { seen.add(y); queue.push(y) } }
+    return seen
+  }
+  return { entry, starters, startFiles, downstream }
 }

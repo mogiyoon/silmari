@@ -11,12 +11,16 @@ export interface Range { readonly start: number; readonly end: number }
 /** body is the source text below this heading and before the next heading. It appears as the node prompt in the viewer accordion. */
 /** range is the file-based byte range occupied by body (INV-8). An empty body has length 0. Its insertion point is right after the heading line.
  *  The viewer asks Writer to change only this range. Writer inserts the user's text there unchanged (INV-1). */
-export interface Heading { level: number; text: string; line: number; subagent: boolean; body: string; range: Range }
+export interface Heading {
+  level: number; text: string; line: number; subagent: boolean; body: string; range: Range
+  /** Set when the heading is a contract heading: `## {{>…}}` (inputs) or `## {{<…}}` (outputs). The text is the words inside the braces. */
+  contract?: 'in' | 'out'
+}
 
-export interface Contract { inputs: string[]; outputs: string[] }
-
-/** Frontmatter for a Claude Code registration file (.claude/agents/*.md). Tool limits exist only here (§1.5). */
-export interface Agent { name?: string; description?: string; tools?: string[]; model?: string }
+/** A type hint on a contract item: `- marker (path) — …`. `path` values are checked for existence by `sil run`; `json` must parse; `text` (the default) is not checked. */
+export type ValueType = 'path' | 'text' | 'json'
+/** inputs/outputs are the item names. types holds only the items that carry a hint. */
+export interface Contract { inputs: string[]; outputs: string[]; types?: Record<string, ValueType> }
 
 /** hash is the SHA-1 of the file bytes. The viewer sends it with an edit request. Writer rejects the request if the file changed in the meantime (T-10). */
 export interface Node {
@@ -27,7 +31,6 @@ export interface Node {
   headings: Heading[]   // The accordion tree.
   contract: Contract | null
   hash: string
-  agent?: Agent
 }
 
 /** range is the byte range occupied by the whole link in the from file (INV-8). Writer changes only this range. */
@@ -42,6 +45,8 @@ export interface Edge {
   isolated: boolean     // Whether it is under a heading with a subagent label such as ((use a subagent)).
   range: Range
   anchor?: string
+  tools?: string[]      // {{+…}} on the call line: the tools the subagent may use, in the author's own words. Present only when written.
+  model?: string        // {{#…}} on the call line: the model the subagent runs on, in the author's own words. Present only when written.
 }
 
 /** range is a file-based byte offset in the file named by where (INV-8). Only diagnostics from links and markers have one. */

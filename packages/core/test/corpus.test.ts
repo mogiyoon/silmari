@@ -6,7 +6,7 @@ import { loadDir, buildGraph, readConfig } from '../src/index.ts'
 
 const root = fileURLToPath(new URL('./fixtures/after/', import.meta.url))
 const cfg = readConfig(root)
-const docs = loadDir(root, cfg.scan.exclude, cfg.words)
+const docs = loadDir(root, cfg.scan.exclude)
 const g = buildGraph(docs, { entry: cfg.entry })
 const node = (id: string) => g.nodes.find((n) => n.id === id)!
 const flow = g.edges.filter((e) => e.from === 'flow.md')
@@ -15,7 +15,7 @@ const count = (code: string) => g.diagnostics.filter((d) => d.code === code).len
 test('Distinguishes tasks from reference documents', () => {
   assert.equal(node('flow.md').kind, 'task', 'flow.md is a task because it calls another task')
   assert.equal(node('research.md').kind, 'task', 'research.md is a task because it is called and has a contract')
-  assert.equal(node('wrap-up.md').kind, 'task', 'wrap-up.md is a task because it has a task heading')
+  assert.equal(node('wrap-up.md').kind, 'task', 'wrap-up.md is a task because its frontmatter says sil: type: task')
   assert.equal(node('structure.md').kind, 'doc'); assert.equal(node('coding-rules.md').kind, 'doc')
   assert.ok(g.nodes.some((n) => n.kind === 'ghost'), 'The ghost node remains')
 })
@@ -50,12 +50,20 @@ test('Edges contain sends and returns', () => {
   assert.ok(g.edges.some((e) => e.from === 'flow.md' && e.to === 'review.md' && e.sends[0] === 'changed-files' && e.returns[0] === 'comments'))
 })
 
-test('A contract is a list below a heading', () => {
-  assert.deepEqual(node('research.md').contract, { inputs: ['target'], outputs: ['findings'] })
+test('A contract is a list below a {{>…}} / {{<…}} heading; an item may carry a type hint', () => {
+  assert.deepEqual(node('research.md').contract, { inputs: ['target'], outputs: ['findings'], types: { target: 'path' } })
+  assert.deepEqual(node('plan.md').contract, { inputs: ['findings'], outputs: ['plan'] }, 'no types key when no item has a hint')
 })
 
-test('There is no frontmatter, so none is required', () => {
-  for (const d of docs.values()) assert.deepEqual(d.fm, {}, d.rel)
+test('Frontmatter is never required; the only key silmari reads is sil: type, used here to pin wrap-up.md as a task', () => {
+  for (const d of docs.values()) assert.deepEqual(d.fm, d.rel === 'wrap-up.md' ? { type: 'task' } : {}, d.rel)
+})
+
+test('Tools and model on a call line are free text on the edge; a subagent call without them gets L-N25', () => {
+  const research = flow.find((e) => e.to === 'research.md')!
+  assert.deepEqual([research.tools, research.model], [['read'], 'fast'])
+  assert.ok(!('tools' in flow.find((e) => e.to === 'review.md')!))
+  assert.equal(count('L-N25'), 1)
 })
 
 test('Finds the seeded problems exactly', () => {

@@ -7,7 +7,6 @@ import { cpus } from 'node:os'
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads'
 import ignore from 'ignore'
 import { parseDoc, type Doc } from './parse.ts'
-import type { Words } from './config.ts'
 
 /** Always excluded. The config cannot include these paths. They are not documents for the graph. */
 export const ALWAYS_EXCLUDE = ['.git', 'node_modules', '.sil', '.claude/worktrees']
@@ -74,9 +73,9 @@ function collect(entries: Entry[], cache?: DocCache): Map<string, Doc> {
   return docs
 }
 
-export function loadDir(root: string, exclude: string[] = [], words?: Words, cache?: DocCache): Map<string, Doc> {
+export function loadDir(root: string, exclude: string[] = [], cache?: DocCache): Map<string, Doc> {
   const entries = scan(root, exclude, cache)
-  for (const e of entries) if (!e.doc) e.doc = parseDoc(e.rel, readFileSync(e.abs, 'utf8'), words)
+  for (const e of entries) if (!e.doc) e.doc = parseDoc(e.rel, readFileSync(e.abs, 'utf8'))
   return collect(entries, cache)
 }
 
@@ -95,18 +94,18 @@ const WORKER_TAG = 'silmari:parse'
 /** The file the worker should run: this module (source or dist ESM) or the CJS bundle that inlined it */
 const selfFile = (): string => (typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url))
 
-interface WorkerIn { tag: string; files: { rel: string; abs: string }[]; words?: Words }
+interface WorkerIn { tag: string; files: { rel: string; abs: string }[] }
 interface WorkerOut { docs: [string, Doc][] }
 
 if (!isMainThread && (workerData as WorkerIn | null)?.tag === WORKER_TAG) {
-  const { files, words } = workerData as WorkerIn
-  const docs: [string, Doc][] = files.map((f) => [f.rel, parseDoc(f.rel, readFileSync(f.abs, 'utf8'), words)])
+  const { files } = workerData as WorkerIn
+  const docs: [string, Doc][] = files.map((f) => [f.rel, parseDoc(f.rel, readFileSync(f.abs, 'utf8'))])
   parentPort!.postMessage({ docs } satisfies WorkerOut)
 }
 
-function parseInWorker(file: string, files: { rel: string; abs: string }[], words?: Words): Promise<Map<string, Doc>> {
+function parseInWorker(file: string, files: { rel: string; abs: string }[]): Promise<Map<string, Doc>> {
   return new Promise((resolve, reject) => {
-    const w = new Worker(file, { workerData: { tag: WORKER_TAG, files, words } satisfies WorkerIn })
+    const w = new Worker(file, { workerData: { tag: WORKER_TAG, files } satisfies WorkerIn })
     let done = false
     w.once('message', (m: WorkerOut) => { done = true; resolve(new Map(m.docs)); void w.terminate() })
     w.once('error', (e) => { done = true; reject(e) })
@@ -121,7 +120,7 @@ export const defaultThreads = (): number => Math.max(1, Math.ceil(cpus().length 
 /** loadDir with the parsing spread over worker threads. Same result as loadDir (same docs, same order, same cache updates).
  *  `threads` caps the number of workers (default: defaultThreads()). If a worker fails, the remaining files are parsed inline
  *  so the load still completes */
-export async function loadDirAsync(root: string, exclude: string[] = [], words?: Words, cache?: DocCache, opt: { threads?: number } = {}): Promise<Map<string, Doc>> {
+export async function loadDirAsync(root: string, exclude: string[] = [], cache?: DocCache, opt: { threads?: number } = {}): Promise<Map<string, Doc>> {
   const entries = scan(root, exclude, cache)
   const pending = entries.filter((e) => !e.doc)
   const threads = Math.max(1, Math.min(opt.threads ?? defaultThreads(), Math.ceil(pending.length / FILES_PER_WORKER)))
@@ -129,11 +128,11 @@ export async function loadDirAsync(root: string, exclude: string[] = [], words?:
     const per = Math.ceil(pending.length / threads)
     const file = selfFile()
     const chunks = Array.from({ length: threads }, (_, i) => pending.slice(i * per, (i + 1) * per).map((e) => ({ rel: e.rel, abs: e.abs })))
-    const results = await Promise.allSettled(chunks.map((c) => parseInWorker(file, c, words)))
+    const results = await Promise.allSettled(chunks.map((c) => parseInWorker(file, c)))
     const byRel = new Map<string, Doc>()
     for (const r of results) if (r.status === 'fulfilled') for (const [rel, doc] of r.value) byRel.set(rel, doc)
     for (const e of pending) e.doc = byRel.get(e.rel)
   }
-  for (const e of pending) if (!e.doc) e.doc = parseDoc(e.rel, readFileSync(e.abs, 'utf8'), words)
+  for (const e of pending) if (!e.doc) e.doc = parseDoc(e.rel, readFileSync(e.abs, 'utf8'))
   return collect(entries, cache)
 }

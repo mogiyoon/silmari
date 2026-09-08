@@ -1,6 +1,6 @@
 {
   "name": "silmari",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Checks the flow and data between md documents and shows them as a graph — sil lint · sil view",
   "keywords": [
     "markdown",
@@ -32,6 +32,7 @@
   },
   "scripts": {
     "build": "node build.mjs",
+    "prepack": "node ../../tools/readme.mjs --check",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts"
   },
