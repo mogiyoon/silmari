@@ -2,7 +2,7 @@
   "name": "silmari-vscode",
   "displayName": "silmari",
   "description": "Checks the flow and data between md documents and shows them as a graph — missing files, missing anchors, data without a link, references nobody calls",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "mogiyoon",
   "icon": "images/icon.png",
   "license": "MIT",
