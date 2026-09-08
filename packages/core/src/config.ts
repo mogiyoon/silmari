@@ -7,26 +7,14 @@ export interface Config {
   scan: { exclude: string[] }
   /** Entry points are graph roots. If none are configured, the layout infers them as nodes with no incoming edges. */
   entry: string[]
-  /** Words recognized by the parser. A key in words replaces that key's entire default list. */
-  words: Words
-  /** The user's language tag (en, ko, ja …). Agents write documents and answers in it. */
+  /** The user's language tag (en, ko, ja …). Agents write documents and answers in it. The parser never depends on it: every marker is a symbol. */
   lang: string
 }
-
-/** Contract headings for inputs and outputs, and task headings recognized by the parser. English by default. A project adds the words of its language in the config (sil init tells the agent to). Matching is case-insensitive.
- *  Subagent labels are not listed here. They are bracket markers at the end of headings, not words. The graph reads only the marker. Its text can be in any language (§1.5). */
-export interface Words { inputs: string[]; outputs: string[]; task: string[] }
-export const DEFAULT_WORDS: Words = {
-  inputs: ['inputs', 'input'],
-  outputs: ['outputs', 'output'],
-  task: ['steps', 'procedure'],
-}
-const WORD_KEYS = ['inputs', 'outputs', 'task'] as const
 
 export const CONFIG_PATH = '.sil/config.yaml'
 
 export function parseConfig(text: string): Config {
-  const cfg: Config = { strict: false, scan: { exclude: [] }, entry: [], words: { ...DEFAULT_WORDS }, lang: 'en' }
+  const cfg: Config = { strict: false, scan: { exclude: [] }, entry: [], lang: 'en' }
   let section = ''
   for (const raw of text.split('\n')) {
     const ln = raw.replace(/#.*$/, '').trimEnd()
@@ -42,8 +30,7 @@ export function parseConfig(text: string): Config {
     }
     const sub = /^\s+(\w+):\s*(.*)$/.exec(ln)
     if (sub && section === 'scan' && sub[1] === 'exclude') cfg.scan.exclude = list(sub[2])
-    if (sub && section === 'words' && (WORD_KEYS as readonly string[]).includes(sub[1])) cfg.words[sub[1] as keyof Words] = list(sub[2])
-    if (sub && section === 'contract' && (sub[1] === 'inputs' || sub[1] === 'outputs')) cfg.words[sub[1]] = list(sub[2]) // Legacy key
+    // `words:` and `contract:` from 0.1.x are ignored: contract headings are now the symbols `## {{>…}}` / `## {{<…}}` in any language
     const item = /^\s*-\s*(.+)$/.exec(ln)
     if (item && section === 'entry') cfg.entry.push(unq(item[1]))
   }

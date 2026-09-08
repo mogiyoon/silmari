@@ -1,3 +1,7 @@
+---
+sil:
+  type: task
+---
 # Wrap up
 
 Takes nothing from the earlier steps. Runs once at the end of the flow.

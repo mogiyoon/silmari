@@ -1,2 +1,2 @@
-# silmari settings for the golden corpus. The documents are English, so the default contract words (inputs / steps / outputs) apply.
+# silmari settings for the golden corpus. Contract headings are the symbols {{>…}} / {{<…}}, so no word list is needed.
 entry: [flow.md]

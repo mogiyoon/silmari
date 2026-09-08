@@ -2,12 +2,12 @@
 
 Read one file and find what has to change. Files are independent, so this can run on each one separately.
 
-## Inputs
-- target
+## {{>Inputs}}
+- target (path) — the file to read
 
 ## Steps
 
 Read the file and look for places that disagree with the [structure](structure.md#layers). Where unsure, write "unsure".
 
-## Outputs
+## {{<Outputs}}
 - findings — three lines: what the file does / the `file:line` to change / whether unsure

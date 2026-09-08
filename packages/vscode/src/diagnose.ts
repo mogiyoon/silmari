@@ -25,8 +25,8 @@ export function splitWhere(where: string): { rel: string; line: number | null } 
 /** Replace only that document with the unsaved body of an open file (S12: appears while editing without saving). */
 export function graphWithOverride(root: string, exclude: string[], override?: { rel: string; text: string }): Graph {
   const cfg = readConfig(root)
-  const docs: Map<string, Doc> = loadDir(root, [...exclude, ...cfg.scan.exclude], cfg.words)
-  if (override) docs.set(override.rel, parseDoc(override.rel, override.text, cfg.words))
+  const docs: Map<string, Doc> = loadDir(root, [...exclude, ...cfg.scan.exclude])
+  if (override) docs.set(override.rel, parseDoc(override.rel, override.text))
   return buildGraph(docs, { exists: existsIn(root), entry: cfg.entry })
 }
 

@@ -53,7 +53,7 @@ export async function view(dir: string, opt: { port?: number; out?: string; open
   const html = viewerHtml()
   if (!html) { process.stderr.write('The viewer is not built: pnpm --filter @silmari/viewer build\n'); return 2 }
   const docs = docCache()
-  const build = async () => buildGraph(await loadDirAsync(root, cfg.scan.exclude, cfg.words, docs), { exists: existsIn(root), entry: cfg.entry })
+  const build = async () => buildGraph(await loadDirAsync(root, cfg.scan.exclude, docs), { exists: existsIn(root), entry: cfg.entry })
 
   if (opt.out) {
     const out = resolve(opt.out)

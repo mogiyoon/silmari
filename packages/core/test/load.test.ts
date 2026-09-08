@@ -23,16 +23,16 @@ test('loadDirAsync (workers) returns the same docs, order and cache state as loa
   try {
     const sync = loadDir(d)
     const c = docCache()
-    const par = await loadDirAsync(d, [], undefined, c, { threads: 3 })
+    const par = await loadDirAsync(d, [], c, { threads: 3 })
     assert.deepEqual([...par.keys()], [...sync.keys()], 'same files in walk order')
     assert.deepEqual(par, sync, 'identical Doc objects (Sets included)')
     assert.equal(c.entries.size, sync.size); assert.equal(c.changed, true)
     // A second load with nothing changed comes from the cache: no parse, changed = false
-    const again = await loadDirAsync(d, [], undefined, c, { threads: 3 })
+    const again = await loadDirAsync(d, [], c, { threads: 3 })
     assert.equal(c.changed, false); assert.equal(again.get('f1.md'), par.get('f1.md'), 'cached object reused')
     // One edited file: only that one is re-parsed (below MIN_PARALLEL, inline), and the cache notices
     writeFileSync(join(d, 'f1.md'), '# Changed\n')
-    const third = await loadDirAsync(d, [], undefined, c)
+    const third = await loadDirAsync(d, [], c)
     assert.equal(c.changed, true); assert.equal(third.get('f1.md')!.title, 'Changed'); assert.equal(third.get('f2.md'), par.get('f2.md'))
   } finally { rmSync(d, { recursive: true, force: true }) }
 })

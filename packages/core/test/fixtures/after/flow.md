@@ -4,7 +4,7 @@ Handle one request in the order research → plan → implement → review. When
 
 ## 1. Research ((use a subagent))
 
-For each target file, call [research](research.md) with {{>target}} and receive {{<findings}}.
+For each target file, call [research](research.md) with {{>target}} and receive {{<findings}}. Tools {{+read}}, model {{#fast}}.
 
 ## 2. Plan
 

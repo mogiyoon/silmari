@@ -15,14 +15,14 @@ const calls = (kids) => kids.map((c, k) => `## ${k + 1}. ${c}${k % 2 ? ' ((use a
 const node = (name, level, f) => {
   const kids = level < depth ? Array.from({ length: fanout }, (_, j) => `${name}-${j + 1}`) : []
   const body = kids.length
-    ? `# ${name}\n\nStep ${name}. Reads [rules ${f}](rules-${f}.md).\n\n${calls(kids)}\n## Inputs\n- in${name}\n\n## Outputs\n- out${name}\n`
-    : `# ${name}\n\nLeaf ${name}. Does one thing and returns it.\n\n## Inputs\n- in${name}\n\n## Steps\n\nRead the input, do the work, write the output.\n\n## Outputs\n- out${name}\n`
+    ? `# ${name}\n\nStep ${name}. Reads [rules ${f}](rules-${f}.md).\n\n${calls(kids)}\n## {{>Inputs}}\n- in${name}\n\n## {{<Outputs}}\n- out${name}\n`
+    : `# ${name}\n\nLeaf ${name}. Does one thing and returns it.\n\n## {{>Inputs}}\n- in${name}\n\n## Steps\n\nRead the input, do the work, write the output.\n\n## {{<Outputs}}\n- out${name}\n`
   write(name, body)
   for (const c of kids) node(c, level + 1, f)
 }
 for (let f = 1; f <= flows; f++) {
   const top = Array.from({ length: fanout }, (_, k) => `f${f}-${k + 1}`)
-  const flow = [`# Flow ${f}`, '', `Stress flow ${f}: depth ${depth}, fanout ${fanout}. Every other call is a subagent.`, '', '## Inputs', `- job${f}`, '', '## Outputs', `- result${f}`, '',
+  const flow = [`# Flow ${f}`, '', `Stress flow ${f}: depth ${depth}, fanout ${fanout}. Every other call is a subagent.`, '', '## {{>Inputs}}', `- job${f}`, '', '## {{<Outputs}}', `- result${f}`, '',
     calls(top),
     `## If the result is rejected (at most 2 times)`, '', `[${top[0]}](${top[0]}.md) receives {{>fixes${f}}} and returns {{<out${top[0]}}} again, then go back to step 2.`, '',
     `## ${fanout + 1}. Wrap up`, '', `Write the summary. See [archive](archive-${f}.md) and the missing [checklist](checklist-${f}.md).`, '']
