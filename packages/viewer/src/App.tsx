@@ -17,7 +17,7 @@ import { useGraph, type Phase } from './data.ts'
 import { useLayout } from './useLayout.ts'
 import { DICTS, LangCtx, initialLang, saveLang, useLang, type Lang } from './i18n.ts'
 import { GLCanvas, glHit, type GLEdge, type GLNode } from './gl.tsx'
-import { type Cell, type LabelOrder, cells, skeleton, nodeSize, secPos, secHeight, SEC_W, SIZE, edgeLabelRows } from './layout.ts'
+import { type Cell, type LabelOrder, cells, skeleton, entryView, nodeSize, secPos, secHeight, SEC_W, SIZE, edgeLabelRows } from './layout.ts'
 import { loadLocal, saveLocal, loadFile, setFileSink, scheduleFileSave, flushFileSave, serverSink, webviewSink, edgeKey, type Saved } from './store.ts'
 
 const KIND: Record<NodeKind, { color: string }> = {
@@ -29,7 +29,9 @@ const ETYPE: Record<SilEdge['type'], string> = { call: '#cbd5e1', mention: '#94a
 type Hd = SilNode['headings'][number]
 /** The right panel's two editing stages: 1 = prompt bodies as textareas, 2 = the whole file as text */
 type EditApi = { editing: boolean; dirty: number; start: () => void; save: () => void; cancel: () => void; raw: { doc: string; hash: string; orig: string; text: string } | null; startRaw: (doc: string) => void; saveRaw: () => void; cancelRaw: () => void; setRawText: (text: string) => void }
-type NData = { sil: SilNode; hot: boolean; dim: boolean; selected: boolean; isolated: boolean; open: boolean; entry: boolean; toggle: (id: string) => void; kids: number; folded: boolean; fold: (id: string) => void; unfoldDeep: (id: string) => void; onSize: (id: string, h: number) => void }
+type NData = { sil: SilNode; hot: boolean; dim: boolean; selected: boolean; isolated: boolean; open: boolean; entry: boolean; toggle: (id: string) => void; kids: number; folded: boolean; fold: (id: string) => void; unfoldDeep: (id: string) => void; onSize: (id: string, h: number) => void
+  /** Entry view: documents outside the open flow that also call this one */ outside?: string[]
+  /** Entry overview: opens this registered flow alone */ drill?: () => void }
 type SData = { doc: string; h: Hd; sel: boolean; hot: boolean; dim: boolean; calls: number }
 type EData = { sil: SilEdge; k: number; hot: boolean; dim: boolean; ghost: boolean; label?: { x: number; y: number }; off: { dx: number; dy: number }; onDrag: (key: string, off: { dx: number; dy: number }) => void; idx: number; onMeasure: (idx: number, w: number, h: number) => void }
 type RN = Node<NData, 'sil'>
@@ -57,7 +59,7 @@ function SilNodeView({ id, data }: NodeProps<RN>) {
   const s = nodeSize(n, data.open)
   // Text is never cut: the title and file name wrap, the node grows, and the real height goes back to the layout
   useEffect(() => { const el = ref.current; if (el && !data.open) data.onSize(n.id, el.offsetHeight) })
-  const bar = n.kind !== 'ghost' || data.kids > 0
+  const bar = n.kind !== 'ghost' || data.kids > 0 || !!data.drill
   return (
     <div ref={ref} className={`nd ${n.kind}${data.selected ? ' sel' : ''}${data.hot ? ' hot' : ''}${data.isolated ? ' iso' : ''}${data.open ? ' open' : ''}`}
          style={{ width: s.w, ...(data.open ? { height: s.h } : { minHeight: s.h }), background: data.open ? undefined : KIND[n.kind].color, borderColor: data.open ? KIND[n.kind].color : undefined, opacity: data.dim ? 0.15 : 1 }}>
@@ -67,13 +69,14 @@ function SilNodeView({ id, data }: NodeProps<RN>) {
           ▸▸ everything below, ◂ closes. ▾ opens the headings */}
       {bar && (
         <div className="bar">
+          {data.drill && <button className="tg fold nodrag" title={t.openFlow} onClick={(ev) => { ev.stopPropagation(); data.drill!() }}>▸▸</button>}
           {data.kids > 0 && (data.folded ? (<>
             <button className="tg fold nodrag" title={t.unfoldOne} onClick={(ev) => { ev.stopPropagation(); data.fold(n.id) }}>▸</button>
             <button className="tg fold nodrag" title={t.unfoldDeep} onClick={(ev) => { ev.stopPropagation(); data.unfoldDeep(n.id) }}>▸▸</button>
           </>) : (
             <button className="tg fold nodrag" title={t.foldOne} onClick={(ev) => { ev.stopPropagation(); data.fold(n.id) }}>◂</button>
           ))}
-          {n.kind !== 'ghost' && (
+          {n.kind !== 'ghost' && !data.drill && (
             <button className="tg nodrag" title={data.open ? t.collapse : t.expandTitle}
                     onClick={(ev) => { ev.stopPropagation(); data.toggle(n.id) }}>{data.open ? '▴' : '▾'}</button>
           )}
@@ -81,7 +84,7 @@ function SilNodeView({ id, data }: NodeProps<RN>) {
       )}
       <div className="hd" title={`${n.title}\n${n.id}`}>
         <div className="t">{n.title}</div>
-        {lod === 'full' && <div className="id">{n.kind === 'ghost' ? t.missingFile : n.id}{data.entry && <span className="entrychip" title={t.entryTitle}>{t.entry}</span>}</div>}
+        {lod === 'full' && <div className="id">{n.kind === 'ghost' ? t.missingFile : n.id}{data.entry && <span className="entrychip" title={t.entryTitle}>{t.entry}</span>}{data.outside && data.outside.length > 0 && <span className="outchip" title={t.outsideTitle(data.outside)}>{t.outsideCallers(data.outside.length)}</span>}</div>}
       </div>
       <Handle type="source" position={Position.Right} />
     </div>
@@ -111,7 +114,7 @@ function SilEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, t
   const { sil: e, k, hot, dim, ghost, label, off, onDrag, idx, onMeasure } = data!
   const { t } = useLang()
   const lod = useContext(LodCtx)
-  const rows = edgeLabelRows(e, { send: t.tagSend, ret: t.tagReceive })
+  const rows = edgeLabelRows(e, { send: t.tagSend, ret: t.tagReceive, tools: t.tagTools, model: t.tagModel })
   const { getZoom } = useReactFlow()
   // Report the rendered label's actual size. Layout uses it instead of an estimate, including the 3px glow
   const elRef = useRef<HTMLDivElement>(null)
@@ -145,19 +148,25 @@ function SilEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, t
                style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`, pointerEvents: 'all', cursor: 'grab' }}>
             {/* Top: show the target md. The label identifies it without tracing the line */}
             <div className="lt" title={t.target(e.to)}>→ {e.to}</div>
-            {/* Head: containing heading (condition) + subagent badge / body: send · receive (fixed tag width) / foot: anchor */}
+            {/* Head: containing heading (condition) + subagent badge, then the call's tools and model as solid chips (no tag, no arrow) / body: send · receive / foot: anchor */}
             {(rows.some((r) => r.kind === 'under') || e.isolated) && (
               <div className="lh">
                 <span className="lhx" title={t.headingOfCall}>{rows.find((r) => r.kind === 'under')?.text ?? ''}</span>
                 {e.isolated && <span className="badge iso">{t.subagent}</span>}
               </div>
             )}
+            {(e.tools?.length || e.model) && (
+              <div className="lr">
+                {e.model && <div className="lrow"><span className="ltag">{t.tagModel}</span><span className="chips"><span className="chip run model">{e.model}</span></span></div>}
+                {e.tools?.length ? <div className="lrow"><span className="ltag">{t.tagTools}</span><span className="chips">{e.tools.map((v) => <span key={v} className="chip run tools">{v}</span>)}</span></div> : null}
+              </div>
+            )}
             {/* Second section: anchor (references only) */}
             {rows.filter((r) => r.kind === 'anchor').map((r) => <div key="anchor" className="la anchor">{r.text}</div>)}
             {/* Third section: send → receive */}
-            {rows.some((r) => r.tag) && (
+            {rows.some((r) => r.kind === 'send' || r.kind === 'ret') && (
               <div className="lb">
-                {rows.filter((r) => r.tag).map((r) => (
+                {rows.filter((r) => r.kind === 'send' || r.kind === 'ret').map((r) => (
                   <div key={r.kind} className={`row ${r.kind}`}>
                     <span className={`tag ${r.kind}`}>{r.kind === 'send' ? '→ ' : '← '}{r.tag}</span>
                     <span className="chips">{r.text.split(', ').map((v) => <span key={v} className={`chip ${r.kind}`}>{v}</span>)}</span>
@@ -202,7 +211,9 @@ function GLLayer(props: { nodes: GLNode[]; edges: GLEdge[]; hide?: Set<string>; 
   const [tx, ty, zoom] = useStore((s) => s.transform)
   return <GLCanvas {...props} view={{ tx, ty, zoom }} />
 }
-type View = 'auto' | 'grid' | 'map' | { cell: string }
+/** 'entry' is the entry overview (start files → entry document → its registered flows); { flow } is one registered flow alone. Both are
+ *  visibility filters over the same graph the CLI and the extension show */
+type View = 'auto' | 'grid' | 'map' | { cell: string } | 'entry' | { flow: string }
 const nodeTypes = { sil: SilNodeView, sec: SecNodeView, cell: CellNodeView }
 const edgeTypes = { sil: SilEdgeView }
 
@@ -323,6 +334,8 @@ function Inner() {
   // Flows: each connected part is a cell. 'map' draws one box per cell, { cell } draws one flow alone, 'grid' draws everything (only
   // when there is a single flow: unconnected flows are never drawn together)
   const cellList = useMemo<Cell[]>(() => (graph ? cells(graph, kindVisible) : []), [graph, kindVisible])
+  // Entry view: what the entry document registers by linking. null when it registers nothing, then the connectivity views are all there is
+  const entryInfo = useMemo(() => (graph ? entryView(graph, kindVisible) : null), [graph, kindVisible])
   const [view, setViewRaw] = useState<View>('auto')
   // Each view change is a history entry, so the browser's back button returns to the map. The canvas also shows a back button
   const setView = (v: View) => { setViewRaw(v); try { history.pushState({ silView: v }, '') } catch { /* webview */ } }
@@ -331,11 +344,25 @@ function Inner() {
     const onPop = (ev: PopStateEvent) => setViewRaw((ev.state as { silView?: View } | null)?.silView ?? 'auto')
     window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop)
   }, [])
-  const flowMode: Exclude<View, 'auto'> = view === 'auto' ? (cellList.length > 1 ? 'map' : 'grid') : view
+  const connectivityMode = (): 'map' | 'grid' => (cellList.length > 1 ? 'map' : 'grid')
+  const flowMode: Exclude<View, 'auto'> = view === 'auto' ? (entryInfo ? 'entry' : connectivityMode())
+    : (view === 'entry' || (typeof view === 'object' && 'flow' in view)) && !entryInfo ? connectivityMode() // the registration went away (kind filter): fall back
+    : view
+  const inEntry = flowMode === 'entry' || (typeof flowMode === 'object' && 'flow' in flowMode)
+  const flowRoot = typeof flowMode === 'object' && 'flow' in flowMode ? flowMode.flow : null
   const visibleAll = useMemo(() => {
-    if (typeof flowMode === 'object') { const c = cellList.find((x) => x.key === flowMode.cell); return c ? new Set(c.nodes) : kindVisible }
+    if (entryInfo && flowMode === 'entry') return new Set([...entryInfo.startFiles, entryInfo.entry, ...entryInfo.starters])
+    if (entryInfo && flowRoot) return new Set([...entryInfo.startFiles, entryInfo.entry, ...entryInfo.downstream(flowRoot)])
+    if (typeof flowMode === 'object' && 'cell' in flowMode) { const c = cellList.find((x) => x.key === flowMode.cell); return c ? new Set(c.nodes) : kindVisible }
     return kindVisible
-  }, [flowMode, cellList, kindVisible])
+  }, [flowMode, flowRoot, entryInfo, cellList, kindVisible])
+  // Entry view: for each shown document, the callers this view hides (a document two flows share). Shown as a badge, so editing it is not a surprise
+  const outsideCallers = useMemo(() => {
+    const m = new Map<string, string[]>()
+    if (!flowRoot || !graph) return m
+    for (const e of graph.edges) if (e.from !== e.to && visibleAll.has(e.to) && !visibleAll.has(e.from) && kindVisible.has(e.from)) { const l = m.get(e.to) ?? m.set(e.to, []).get(e.to)!; if (!l.includes(e.from)) l.push(e.from) }
+    return m
+  }, [flowRoot, graph, visibleAll, kindVisible])
   // Subtree folding. The call tree of each flow (its BFS parent links) says what hangs below a node. A folded node hides every
   // descendant. Every flow opens with everything below the first level folded; from then on the user's folds and unfolds are kept
   const trees = useMemo(() => cellList.filter((c) => !c.singles).map((c) => ({ cell: c, tree: skeleton(graph!, c.nodes.filter((id) => visibleAll.has(id))) })), [cellList, graph, visibleAll])
@@ -343,9 +370,11 @@ function Inner() {
   const collapsed = useMemo<Set<string>>(() => {
     if (saved.collapsed) return new Set(saved.collapsed)
     const auto = new Set<string>()
-    for (const { tree } of trees) for (const [id, r] of tree.rank) if (r >= 1 && tree.kids.has(id)) auto.add(id)
+    // The entry document sits one column right of the start files (rank 1) but is the real first level; the open flow's root likewise
+    const keep = new Set([...(graph?.entry ?? []), ...(flowRoot ? [flowRoot] : [])])
+    for (const { tree } of trees) for (const [id, r] of tree.rank) if (r >= 1 && tree.kids.has(id) && !keep.has(id)) auto.add(id)
     return auto
-  }, [saved.collapsed, trees])
+  }, [saved.collapsed, trees, graph, flowRoot])
   const hidden = useMemo(() => {
     const h = new Set<string>()
     const drop = (id: string) => { for (const k of kidsOf.get(id) ?? []) if (!h.has(k)) { h.add(k); drop(k) } }
@@ -365,7 +394,7 @@ function Inner() {
   // Unfold this node and everything below it in one go
   const unfoldDeep = (id: string) => update((s) => { pin(id); const c = new Set(s.collapsed ?? [...collapsed]); const walk = (x: string) => { c.delete(x); for (const k of kidsOf.get(x) ?? []) walk(k) }; walk(id); return { ...s, collapsed: [...c] } })
   // Folding or unfolding everything changes the picture completely, so the view refits (a single node's fold keeps the viewport instead)
-  const foldAll = () => { fitKey.current = ''; update((s) => ({ ...s, collapsed: trees.flatMap(({ tree }) => [...tree.rank].filter(([id, r]) => r >= 1 && tree.kids.has(id)).map(([id]) => id)) })) }
+  const foldAll = () => { fitKey.current = ''; const keep = new Set([...(graph?.entry ?? []), ...(flowRoot ? [flowRoot] : [])]); update((s) => ({ ...s, collapsed: trees.flatMap(({ tree }) => [...tree.rank].filter(([id, r]) => r >= 1 && tree.kids.has(id) && !keep.has(id)).map(([id]) => id)) })) }
   const unfoldAll = () => { fitKey.current = ''; update((s) => ({ ...s, collapsed: [] })) }
   // Measured node heights (titles wrap). Same idea as labels: estimate, render, measure, lay out again
   const [nodeH, setNodeH] = useState<Map<string, number>>(new Map())
@@ -516,7 +545,10 @@ function Inner() {
       const s = nodeSize(n, isOpen)
       // A user-dragged position takes priority. Collapse and expansion do not reset it
       out.push({ id: n.id, type: 'sil', position: saved.nodes[n.id] ?? pos.get(n.id) ?? { x: 0, y: 0 }, width: s.w, height: isOpen ? s.h : (nodeH.get(n.id) ?? s.h),
-        data: { sil: n, hot: false, dim: false, selected: false, isolated: isolatedTargets.has(n.id), open: isOpen, entry: (graph.entry ?? []).includes(n.id), toggle, kids: kidsOf.get(n.id)?.length ?? 0, folded: hiddenBelow.has(n.id), fold, unfoldDeep, onSize } })
+        data: { sil: n, hot: false, dim: false, selected: false, isolated: isolatedTargets.has(n.id), open: isOpen, entry: (graph.entry ?? []).includes(n.id), toggle, kids: kidsOf.get(n.id)?.length ?? 0, folded: hiddenBelow.has(n.id), fold, unfoldDeep, onSize,
+          ...(outsideCallers.has(n.id) ? { outside: outsideCallers.get(n.id) } : {}),
+          // Entry overview: a registered flow is one box; ▸▸ opens it alone. The ▾ expand button is hidden there, so the box stays a summary
+          ...(flowMode === 'entry' && entryInfo?.starters.includes(n.id) ? { drill: () => setView({ flow: n.id }) } : {}) } })
       if (!isOpen) continue
       // Heading boxes inside an expanded node. Positions are relative to the parent. They cannot leave it or be dragged alone
       n.headings.forEach((h, i) => out.push({ id: secId(n.id, h.line), type: 'sec', parentId: n.id, extent: 'parent', draggable: false, selectable: false,
@@ -526,10 +558,10 @@ function Inner() {
     // Keep earlier measurements. Otherwise React Flow drops handle positions. It does not remeasure same-sized nodes, so edges disappear
     setRfNodes((prev) => { const m = new Map(prev.map((x) => [x.id, x.measured])); return out.map((x) => (m.get(x.id) ? { ...x, measured: m.get(x.id) } : x)) })
     // Fit the view only when the graph or filter changes. This keeps zoom steady during expansion and collapse
-    const key = `${graph.stats.files}|${graph.stats.edges}|${typeof flowMode === 'object' ? flowMode.cell : flowMode}|${[...visibleAll].join(',')}` // folding a subtree keeps the viewport
+    const key = `${graph.stats.files}|${graph.stats.edges}|${JSON.stringify(flowMode)}|${[...visibleAll].join(',')}` // folding a subtree keeps the viewport
     // Not while the layout worker is still computing: there is nothing to fit yet, and the fit must happen once the positions arrive
     if (!laying && fitKey.current !== key) { fitKey.current = key; if (winIds) { pendingFit.current = null; fitAll.current() } else pendingFit.current = out.map((x) => x.id).join('|') } // fit once exactly these nodes are committed (below)
-  }, [graph, shown, visibleAll, open, placed, laying, isolatedTargets, saved.nodes, setRfNodes, fitView, flowMode, cellList, winIds, kidsOf, hiddenBelow, nodeH]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [graph, shown, visibleAll, open, placed, laying, isolatedTargets, saved.nodes, setRfNodes, fitView, flowMode, cellList, winIds, kidsOf, hiddenBelow, nodeH, outsideCallers, entryInfo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Force measurement after unmeasured nodes (new heading boxes) enter the DOM. If the node list changes first (label measurement → layout),
   // React Flow cannot fill in handle positions. Edges for those nodes do not render
@@ -602,9 +634,13 @@ function Inner() {
         <Legend />
         {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
         <div className="topbar">
-          {cellList.length > 1 && flowMode !== 'map' && (<>
+          {flowRoot && (<>
+            <button className="resetbtn" onClick={() => setView('entry')}>◂ {t.entryOverview}</button>
+            <span className="crumb">{byId.get(flowRoot)?.title ?? flowRoot}</span>
+          </>)}
+          {!inEntry && cellList.length > 1 && flowMode !== 'map' && (<>
             <button className="resetbtn" onClick={() => setView('map')}>◂ {t.viewMap}</button>
-            <span className="crumb">{flowMode === 'grid' ? t.viewGrid : (() => { const c = cellList.find((x) => x.key === flowMode.cell); return c?.singles ? t.loose : (byId.get(c?.root ?? '')?.title ?? flowMode.cell) })()}</span>
+            <span className="crumb">{flowMode === 'grid' ? t.viewGrid : (() => { const c = cellList.find((x) => x.key === (flowMode as { cell: string }).cell); return c?.singles ? t.loose : (byId.get(c?.root ?? '')?.title ?? (flowMode as { cell: string }).cell) })()}</span>
           </>)}
           {(Object.keys(saved.nodes).length > 0 || Object.keys(saved.labels).length > 0 || saved.collapsed) && (
             <button className="resetbtn" title={t.resetTitle} onClick={() => update((s) => ({ ...s, nodes: {}, labels: {}, collapsed: undefined }))}>{t.reset}</button>
@@ -613,7 +649,7 @@ function Inner() {
       </div>
       <EditCtx.Provider value={{ editable, editing, drafts, setDraft, notify: (kind, text) => { setToast({ kind, text }); setTimeout(() => setToast(null), 4000) } }}>
         <UiCtx.Provider value={{ secs: uiSecs, flipSec, det: uiDet, setDet }}>
-        {sideOpen && <Side graph={graph} live={live} error={error} off={off} setOff={setOff} cellList={cellList} mode={flowMode} setView={setView} visible={visibleAll} sel={sel} setSel={setSel} selHead={selHead} open={open} toggle={toggle} edit={{ editing, dirty: dirty.length, start: () => { setRaw(null); setEditing(true) }, save: saveEdit, cancel: cancelEdit, raw, startRaw, saveRaw, cancelRaw: () => setRaw(null), setRawText: (text) => setRaw((r) => (r ? { ...r, text } : r)) }} />}
+        {sideOpen && <Side graph={graph} live={live} error={error} off={off} setOff={setOff} cellList={cellList} entryInfo={entryInfo} mode={flowMode} setView={setView} visible={visibleAll} sel={sel} setSel={setSel} selHead={selHead} open={open} toggle={toggle} edit={{ editing, dirty: dirty.length, start: () => { setRaw(null); setEditing(true) }, save: saveEdit, cancel: cancelEdit, raw, startRaw, saveRaw, cancelRaw: () => setRaw(null), setRawText: (text) => setRaw((r) => (r ? { ...r, text } : r)) }} />}
         </UiCtx.Provider>
       </EditCtx.Provider>
       {/* Menu rail at the right edge. It toggles the panel and stays visible while the panel is closed */}
@@ -641,29 +677,49 @@ function Sec({ id, title, extra, children }: { id: string; title: string; extra?
   )
 }
 
-function Side({ graph, live, error, off, setOff, cellList, mode, setView, visible, sel, setSel, selHead, open, toggle, edit }: {
+function Side({ graph, live, error, off, setOff, cellList, entryInfo, mode, setView, visible, sel, setSel, selHead, open, toggle, edit }: {
   graph: Graph; live: boolean; error: string | null; off: Set<NodeKind>; setOff: (s: Set<NodeKind>) => void
-  cellList: Cell[]; mode: Exclude<View, 'auto'>; setView: (v: View) => void; visible: Set<string>
+  cellList: Cell[]; entryInfo: ReturnType<typeof entryView>; mode: Exclude<View, 'auto'>; setView: (v: View) => void; visible: Set<string>
   sel: string | null; setSel: (id: string | null) => void; selHead: { doc: string; line: number } | null; open: Set<string>; toggle: (id: string) => void
   edit: EditApi
 }) {
   const { t } = useLang()
   const node = sel ? graph.nodes.find((n) => n.id === sel) : undefined
   // Stable identity: the list resets its scroll paging only when the diagnostics really change, not on every re-render
-  const diags = useMemo(() => (typeof mode === 'object' ? graph.diagnostics.filter((d) => visible.has(d.where.split(':')[0])) : graph.diagnostics), [graph, mode, visible])
+  const inEntry = mode === 'entry' || (typeof mode === 'object' && 'flow' in mode)
+  const partial = typeof mode === 'object' || mode === 'entry'
+  const diags = useMemo(() => (partial ? graph.diagnostics.filter((d) => visible.has(d.where.split(':')[0])) : graph.diagnostics), [graph, partial, visible])
+  const hiddenDiags = graph.diagnostics.length - diags.length
+  const byId = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph])
+  const allView = (): View => (cellList.length > 1 ? 'map' : 'grid')
   const flip = (k: NodeKind) => { const s = new Set(off); s.has(k) ? s.delete(k) : s.add(k); setOff(s) }
   return (
     <aside className="side">
       <h1>silmari <span className={`badge ${live ? (error ? 'bad' : 'live') : ''}`}>{live ? (error ? t.disconnected : 'live') : t.snapshot}</span></h1>
       <div className="sub">{t.stats(graph.stats)}</div>
-      {cellList.length > 1 && (<Sec id="flows" title={t.flows} extra={<span className="cnt">{cellList.length}</span>}>
-        <div className={`f${mode === 'map' ? ' on' : ''}`} onClick={() => setView('map')}>{t.viewMap}<span className="cnt">{cellList.length}</span></div>
-        {cellList.map((c) => {
-          const first = graph.nodes.find((n) => n.id === c.root)
-          return <div key={c.key} className={`f${typeof mode === 'object' && mode.cell === c.key ? ' on' : ''}`} onClick={() => setView({ cell: c.key })}>
-            <span className="dot" style={{ background: c.singles ? '#64748b' : KIND[first?.kind ?? 'task'].color }} />{c.singles ? t.loose : first?.title ?? c.key}{c.entry && <span className="entrychip">{t.entry}</span>}<span className="cnt">{c.nodes.length}</span>
-          </div>
-        })}
+      {(entryInfo || cellList.length > 1) && (<Sec id="flows" title={t.flows} extra={<span className="cnt">{inEntry && entryInfo ? entryInfo.starters.length : cellList.length}</span>}>
+        {/* Two scopes over the same graph: the flows the entry document registers, or every md file grouped by what links to what */}
+        {entryInfo && (<div className="seg">
+          <button className={inEntry ? 'on' : ''} onClick={() => setView('entry')}>{t.scopeEntry}</button>
+          <button className={inEntry ? '' : 'on'} onClick={() => setView(allView())}>{t.scopeAll}</button>
+        </div>)}
+        {inEntry && entryInfo ? (<>
+          <div className={`f${mode === 'entry' ? ' on' : ''}`} onClick={() => setView('entry')}><span className="dot" style={{ background: KIND[byId.get(entryInfo.entry)?.kind ?? 'doc'].color }} />{byId.get(entryInfo.entry)?.title ?? entryInfo.entry}<span className="entrychip">{t.entry}</span><span className="cnt">{entryInfo.starters.length}</span></div>
+          {entryInfo.starters.map((id) => {
+            const n = byId.get(id)
+            return <div key={id} className={`f${typeof mode === 'object' && 'flow' in mode && mode.flow === id ? ' on' : ''}`} onClick={() => setView({ flow: id })}>
+              <span className="dot" style={{ background: KIND[n?.kind ?? 'task'].color }} />{n?.title ?? id}<span className="cnt">{entryInfo.downstream(id).size}</span>
+            </div>
+          })}
+        </>) : (<>
+          {cellList.length > 1 && <div className={`f${mode === 'map' ? ' on' : ''}`} onClick={() => setView('map')}>{t.viewMap}<span className="cnt">{cellList.length}</span></div>}
+          {cellList.map((c) => {
+            const first = byId.get(c.root)
+            return <div key={c.key} className={`f${typeof mode === 'object' && 'cell' in mode && mode.cell === c.key ? ' on' : ''}`} onClick={() => setView(cellList.length > 1 ? { cell: c.key } : 'grid')}>
+              <span className="dot" style={{ background: c.singles ? '#64748b' : KIND[first?.kind ?? 'task'].color }} />{c.singles ? t.loose : first?.title ?? c.key}{c.entry && <span className="entrychip">{t.entry}</span>}<span className="cnt">{c.nodes.length}</span>
+            </div>
+          })}
+        </>)}
       </Sec>)}
       <Sec id="kinds" title={t.kinds} extra={off.size ? <span className="cnt">−{off.size}</span> : null}>
         {(Object.keys(KIND) as NodeKind[]).map((k) => (
@@ -679,6 +735,7 @@ function Side({ graph, live, error, off, setOff, cellList, mode, setView, visibl
       </Sec>
       <Sec id="diag" title={t.diagnostics} extra={<span className="cnt">{diags.length}</span>}>
         <DiagList ds={diags} go={setSel} />
+        {hiddenDiags > 0 && <div className="hiddendiag" onClick={() => setView(allView())}>{t.hiddenDiags(hiddenDiags)}</div>}
       </Sec>
     </aside>
   )
@@ -765,12 +822,18 @@ function Detail({ graph, node: n, go, selHead, isOpen, toggle, edit }: { graph: 
       {n.desc && <div className="desc">{n.desc}</div>}
       {/* Keep metadata (registration · contract · edges) collapsed and focus on the prompt */}
       <Det k="m" className="meta-d" summary={<span className="muted">{t.summary(out.length + inn.length)}</span>}>
-        {n.agent && (
-          <div className="ct"><b>{t.registeredAgent}</b>
-            {n.agent.name && <span>{n.agent.name} </span>}{n.agent.model && <span className="muted">· {n.agent.model}</span>}
-            {n.agent.tools && <div>tools: {n.agent.tools.join(', ')}</div>}
-          </div>
-        )}
+        {/* How this file is called: tools and model come from the call lines, so a file called with different ones shows both */}
+        {inn.some((e) => e.type === 'call') && (() => {
+          const calls = inn.filter((e) => e.type === 'call')
+          const models = [...new Set(calls.map((e) => e.model).filter((m): m is string => !!m))]
+          const tools = [...new Set(calls.map((e) => e.tools?.join(', ')).filter((x): x is string => !!x))]
+          return (
+            <div className="ct"><b>{t.calledAs(calls.length)}</b>
+              {models.length > 0 && <span className="muted"> · {t.models}: {models.join(' / ')}</span>}
+              {tools.length > 0 && <div>{t.toolSets}: {tools.join(' / ')}</div>}
+            </div>
+          )
+        })()}
         {n.contract && (
           <div className="ct"><b>{t.inputs}</b> {n.contract.inputs.join(', ') || '—'}<br /><b>{t.outputs}</b> {n.contract.outputs.join(', ') || '—'}</div>
         )}

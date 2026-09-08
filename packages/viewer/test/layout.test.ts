@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import { loadDir, existsIn, buildGraph, readConfig } from '@silmari/core'
-import { layout, labelBox, SIZE } from '../src/layout.ts'
+import { layout, labelBox, SIZE, entryView, skeleton } from '../src/layout.ts'
 
 // The golden corpus lives with core's tests; the personal migration corpus sits outside the repository (notes/ is ignored) and is used only where present
 const CORPORA: [string, string][] = [['after', resolve(import.meta.dirname, '../../core/test/fixtures/after')], ['mogiyoon', resolve(import.meta.dirname, '../../../notes/examples/mogiyoon')]]
@@ -35,9 +35,9 @@ for (const [dir, root] of CORPORA) {
 
 test('layout: handles multiple parallel edges and stacks labels vertically', () => {
   const g = buildGraph(new Map([
-    ['f.md', { rel: 'f.md', fm: {}, agent: null, title: 'F', desc: '', headings: [], anchors: new Set(), contractIn: [], contractOut: [], hasTaskHead: false, ignores: new Set(), diags: [],
-      links: [1, 2, 3, 4, 5].map((i) => ({ text: 'c', target: 'c.md', line: i, range: { start: 0, end: 1 }, sends: ['x'], returns: [], under: ['F', String(i)], isolated: false, refstyle: false })) }],
-    ['c.md', { rel: 'c.md', fm: {}, agent: null, title: 'C', desc: '', headings: [], anchors: new Set(), contractIn: [], contractOut: [], hasTaskHead: true, ignores: new Set(), diags: [], links: [] }],
+    ['f.md', { rel: 'f.md', fm: {}, title: 'F', desc: '', headings: [], anchors: new Set(), contractIn: [], contractOut: [], contractTypes: {}, ignores: new Set(), diags: [],
+      links: [1, 2, 3, 4, 5].map((i) => ({ text: 'c', target: 'c.md', line: i, range: { start: 0, end: 1 }, sends: ['x'], returns: [], tools: [], model: null, under: ['F', String(i)], isolated: false, refstyle: false })) }],
+    ['c.md', { rel: 'c.md', fm: { type: 'task' }, title: 'C', desc: '', headings: [], anchors: new Set(), contractIn: [], contractOut: [], contractTypes: {}, ignores: new Set(), diags: [], links: [] }],
   ]))
   assert.equal(g.edges.length, 5)
   const { labels } = layout(g, new Set(['f.md', 'c.md']))
@@ -154,4 +154,35 @@ test("layout option labelOrder 'flow': labels follow the parent's line order top
   const { labels } = layout(g, new Set(g.nodes.map((n) => n.id)), new Set(), undefined, {}, { labelOrder: 'flow' })
   const ys = g.edges.map((e, i) => ({ e, i })).filter(({ e, i }) => e.from === 'flow.md' && labels.has(i)).map(({ i }) => labels.get(i)!.y)
   for (let k = 1; k < ys.length; k++) assert.ok(ys[k] > ys[k - 1], `label ${k} below label ${k - 1}`)
+})
+
+test('entry view: the entry document registers flows by linking them; start files sit before it; downstream stops at the entry; shared documents belong to both', async () => {
+  const { parseDoc } = await import('@silmari/core')
+  const docs = new Map([
+    ['CLAUDE.md', parseDoc('CLAUDE.md', '# CLAUDE\n\n[SILMARI.md](SILMARI.md) is the entry point. Read it first.\n')],
+    ['SILMARI.md', parseDoc('SILMARI.md', '# SILMARI\n\nFollow the [rules](RULES.md).\n\n## Flow\n\n- [Feature](a.md)\n- [Release](b.md)\n')],
+    ['RULES.md', parseDoc('RULES.md', '# Rules\n\nBe brief.\n')],
+    ['a.md', parseDoc('a.md', '# A\n\nCall [c](c.md) with {{>x}} and receive {{<y}}. See [SILMARI.md](SILMARI.md).\n')],
+    ['b.md', parseDoc('b.md', '# B\n\nCall [c](c.md) with {{>x}} and receive {{<y}}. Then [d](d.md) with {{>y}}.\n')],
+    ['c.md', parseDoc('c.md', '# C\n\n## {{>Inputs}}\n- x\n## {{<Outputs}}\n- y\n')],
+    ['d.md', parseDoc('d.md', '# D\n\n## {{>Inputs}}\n- y\n')],
+    ['loose.md', parseDoc('loose.md', '# Loose\n\nCall [c](c.md) with {{>x}}.\n')],
+  ])
+  const g = buildGraph(docs, { entry: ['SILMARI.md'] })
+  const all = new Set(g.nodes.map((n) => n.id))
+  const v = entryView(g, all)!
+  assert.ok(v, 'the entry document links tasks, so the entry view exists')
+  assert.equal(v.entry, 'SILMARI.md')
+  assert.deepEqual(v.starters, ['a.md', 'b.md'], 'task links from the entry document, in link order; the rules document (a reference) is not a starter')
+  assert.deepEqual(v.startFiles, ['CLAUDE.md'], 'links the entry point and nobody calls it')
+  assert.deepEqual([...v.downstream('a.md')].sort(), ['a.md', 'c.md'], 'a links back to SILMARI.md, but downstream never re-enters the entry document')
+  assert.deepEqual([...v.downstream('b.md')].sort(), ['b.md', 'c.md', 'd.md'])
+  // No registration: the viewer falls back to the connectivity view
+  const noReg = buildGraph(new Map([['SILMARI.md', docs.get('SILMARI.md')!], ['RULES.md', docs.get('RULES.md')!]]), { entry: ['SILMARI.md'] })
+  assert.equal(entryView(noReg, new Set(noReg.nodes.map((n) => n.id))), null)
+  // A hidden kind drops its starters: with tasks off there is nothing to start from
+  assert.equal(entryView(g, new Set([...all].filter((id) => g.nodes.find((n) => n.id === id)!.kind !== 'task'))), null)
+  // The start file is placed before the entry point, and the entry point one column to its right
+  const sk = skeleton(g, [...all])
+  assert.equal(sk.rank.get('CLAUDE.md'), 0); assert.equal(sk.rank.get('SILMARI.md'), 1); assert.equal(sk.rank.get('a.md'), 2)
 })

@@ -88,6 +88,12 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 .el .row .tag { margin-right: 2px }
 .el .chip { display: inline-block; padding: 0 6px; border-radius: 4px; background: #1e293b; border: 1px solid #475569; color: #e2e8f0; font-size: 10.5px; line-height: 16px }
 .el .chip.send { border-color: #3b82f6 } .el .chip.ret { border-color: #d97706 }
+/* The call's model and tools: solid chips under the subagent badge, told apart by colour only */
+.el .lr { display: grid; grid-template-columns: max-content 1fr; column-gap: 6px; row-gap: 4px; align-items: center; margin: -1px -2px 4px; padding-bottom: 4px; border-bottom: 1px solid #334155 }
+.el .lrow { display: contents }
+.el .lh + .lr { margin-top: -2px }
+.el .ltag { color: #94a3b8; font-size: 10px; white-space: nowrap }
+.el .chip.run { border: none; color: #fff } .el .chip.run.model { background: #0e7490 } .el .chip.run.tools { background: #be185d }
 .el .row .badge { margin: 0 }
 /* 오른쪽 창의 프롬프트가 옆으로 길어지지 않게 — 긴 경로·코드도 꺾는다 */
 .side { overflow-x: hidden }
@@ -154,3 +160,9 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 .side h2.sech .tri { width: 10px; color: #64748b }
 .side h2.sech .cnt { margin-left: auto; text-transform: none; letter-spacing: 0; max-width: 60%; text-align: right; white-space: normal; word-break: break-word }
 .side h2.sech:hover { color: #cbd5e1 }
+/* Entry view: the scope switch at the top of the flows section, and the badge on a document that flows outside the open one also call */
+.seg { display: flex; gap: 4px; margin: 0 0 6px; padding: 3px; background: #0f172a; border-radius: 8px }
+.seg button { flex: 1; font: 12px -apple-system, "Apple SD Gothic Neo", sans-serif; background: transparent; color: #94a3b8; border: 0; border-radius: 6px; padding: 4px 6px; cursor: pointer }
+.seg button.on { background: #334155; color: #e2e8f0 } .seg button:hover { color: #e2e8f0 }
+.nd .outchip { margin-left: 6px; font-size: 9.5px; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.35); border-radius: 4px; padding: 0 5px; vertical-align: middle; cursor: help }
+.side .hiddendiag { padding: 6px 8px; color: #94a3b8; font-size: 12px; cursor: pointer; border-radius: 6px } .side .hiddendiag:hover { background: #334155; color: #e2e8f0 }
