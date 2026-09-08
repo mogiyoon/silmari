@@ -3,6 +3,40 @@
 // the start files, to apply them in order and delete them. Only versions that changed the notation have a note; a version that only
 // changed silmari's own files (SILMARI.md sections, config) needs none, since `sil update` rewrites those itself.
 export const UPDATE_NOTES: Record<string, string> = {
+  '0.2.0': `# silmari 0.2.0 — what changed
+
+## 1. Tell the user first
+
+In the user's language, in plain words. Each line is "before → now":
+
+- **Contract headings.** Before: the called document listed its values under \`## Inputs\` / \`## Steps\` / \`## Outputs\`, and the words for other languages had to be registered under \`words:\` in \`.sil/config.yaml\`. Now: the heading is one symbol, \`## {{>Inputs}}\` for inputs and \`## {{<Outputs}}\` for outputs, with any words inside (\`### {{>입력}}\`). No word list; \`## Steps\` is an ordinary heading.
+- **Tools and model.** Before: in the called document's frontmatter (\`tools:\`, \`model:\`). Now: on the call line in the orchestrator, in your own words: \`Use the tools {{+read}} and {{+edit}}, and the model {{#fast}}.\` The only frontmatter silmari reads is \`sil:\` / \`type: task|doc\`.
+- **Subagent label.** Before: single brackets at the end of the heading, \`## 1. Research [use a subagent]\`. Now: double parentheses, \`## 1. Research ((use a subagent via sil run))\`. Markdown read the brackets as a reference link.
+- **Value hints.** Now a contract item can say what kind of value it is: \`- spec (path) — the design document\`, \`(json)\`, \`(text)\`. \`sil run\` checks a \`(path)\` exists and a \`(json)\` parses before the subagent starts.
+- **Running a step.** Now a step with a \`(( ))\` label is started with \`sil run <runtime> --step flow.md#N --send name=value …\` instead of the agent's own subagent feature; the subagent starts with the project's start files switched off and receives rules only through links.
+
+Then ask: "Start the silmari update?" If the answer is no, stop here and leave this file.
+
+## 2. If yes: what to change in the documents
+
+1. **Contract headings → symbols.** In every called document, make the inputs heading \`## {{>…}}\` and the outputs heading \`## {{<…}}\`, keeping your words inside. Leave \`## Steps\` as it is. Then delete the \`words:\` block from \`.sil/config.yaml\`; it is ignored.
+   - Before: \`## 입력\` … \`## 출력\` with \`words: { inputs: [입력], outputs: [출력] }\` in the config
+   - Now: \`## {{>입력}}\` … \`## {{<출력}}\`, no config entry
+2. **Frontmatter tools and model → the call line.** For each called document that has \`tools:\` or \`model:\` in its frontmatter, write them on the line that calls it, in the orchestrator, and remove them from the frontmatter. Keep \`sil: type\` if present; every other key belongs to another tool and stays.
+   - Before, at the top of agents/analyst.md:
+     \`\`\`yaml
+     ---
+     tools: [Read, Write]
+     model: sonnet
+     ---
+     \`\`\`
+   - Now, on the call line in flow.md: \`Call [Analyst](agents/analyst.md) with {{>posting}} and receive {{<analysis}}. Use the tools {{+read}} and {{+write}}, and the model {{#balanced}}.\`
+3. **Labels \`[…]\` → \`((…))\`.** At the end of each heading that marks a subagent step, replace the brackets with double parentheses; drop a leading \`@\`. Lint reports the old forms as L-I05 and L-I04.
+   - Before: \`## 1. Research [use a subagent]\`
+   - Now: \`## 1. Research ((use a subagent via sil run))\`
+4. **Add hints where the kind of value matters.** Put \`(path)\` after an input that is a file location and \`(json)\` after one that is structured data. Values that are plain text need nothing.
+5. Run \`sil lint\` until it reports error 0, then delete this file.
+`,
   '0.3.0': `# silmari 0.3.0 — what changed
 
 ## 1. Tell the user first

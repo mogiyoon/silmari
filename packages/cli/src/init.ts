@@ -220,6 +220,14 @@ export function migrate(dir: string): number {
   return 0
 }
 
+/** The version an unrecorded project was set up with, read from what that version's sil init left behind:
+ *  0.1.x had a `words:` block in the config and no Running section; 0.2.0 wrote the Running section; 0.3.0 said that a link can point at any file */
+function inferVersion(root: string): string {
+  const cfgText = existsSync(resolve(root, CONFIG_PATH)) ? readFileSync(resolve(root, CONFIG_PATH), 'utf8') : ''
+  const entry = existsSync(resolve(root, ENTRY_MAIN)) ? readFileSync(resolve(root, ENTRY_MAIN), 'utf8') : ''
+  if (/^words:/m.test(cfgText) || !entry.includes('## Running a call')) return '0.1.0'
+  return entry.includes('A link can point at any file') ? '0.3.0' : '0.2.0'
+}
 const GENERATED = ['Notation', 'Running a call', 'Subagents', 'Migration'] // the sections silmari owns in an entry document; Migration moved to .sil/migration.md in 0.3.1
 /** A document as its head and its level-2 sections, each with the heading line. Blank lines at section ends are dropped and put back on join */
 function sections(text: string): { head: string; list: { name: string; text: string }[] } {
@@ -256,7 +264,10 @@ export function refreshEntry(text: string): string | null {
 export function update(dir: string): number {
   const root = findProjectRoot(resolve(dir))
   if (!root) { process.stderr.write(`sil update: no .sil/ found above ${resolve(dir)}. Run sil init first.\n`); return 1 }
-  const cfg = readConfig(root), installed = silVersion(), from = cfg.version ?? '0.0.0'
+  const cfg = readConfig(root), installed = silVersion()
+  // Projects from before 0.3.1 recorded no version. What sil init wrote at the time says which one it was, so only the later notes apply
+  const inferred = cfg.version === null ? inferVersion(root) : null
+  const from = cfg.version ?? inferred ?? '0.0.0'
   let changed = 0
   for (const rel of cfg.entry) {
     const p = resolve(root, rel)
@@ -293,7 +304,7 @@ export function update(dir: string): number {
   if (cfg.version !== installed) {
     const line = `version: ${installed}        # the silmari that wrote SILMARI.md and this file. \`sil update\` refreshes them and records the new version`
     const next = /^version:.*$/m.test(text) ? text.replace(/^version:.*$/m, line) : text.replace(/\n?$/, '\n') + line + '\n'
-    writeFileSync(cp, next); changed++; process.stdout.write(`Recorded: ${CONFIG_PATH} version ${installed}${cfg.version ? ` (was ${cfg.version})` : ''}\n`)
+    writeFileSync(cp, next); changed++; process.stdout.write(`Recorded: ${CONFIG_PATH} version ${installed}${cfg.version ? ` (was ${cfg.version})` : inferred ? ` (was ${inferred}, inferred from what sil init wrote)` : ''}\n`)
   }
   process.stdout.write(changed ? `Done: ${installed}${pending.length ? `. The agent applies ${UPDATES_DIR}/ at the start of the next session` : ''}\n` : `Up to date: ${installed}\n`)
   return 0

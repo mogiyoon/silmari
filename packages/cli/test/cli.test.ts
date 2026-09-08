@@ -180,7 +180,8 @@ test('update: refreshes the generated sections of SILMARI.md, moves Migration to
   const out = run('update', d).stdout
   assert.match(out, /Updated: SILMARI\.md \(Notation · Running a call · Subagents refreshed · Migration moved to \.sil\/migration\.md\)/)
   assert.match(out, /Updated: CLAUDE\.md \(migration line points at \.sil\/migration\.md\)/); assert.match(out, /Created: \.sil\/migration\.md/)
-  assert.match(out, /Created: \.sil\/updates\/0\.3\.0\.md/); assert.match(out, /Appended: CLAUDE\.md \(update notes prompt\)/); assert.match(out, /Recorded: \.sil\/config\.yaml version \d+\.\d+\.\d+\n/)
+  assert.match(out, /Created: \.sil\/updates\/0\.3\.0\.md/); assert.match(out, /Appended: CLAUDE\.md \(update notes prompt\)/); assert.match(out, /Recorded: \.sil\/config\.yaml version \d+\.\d+\.\d+ \(was 0\.2\.0, inferred from what sil init wrote\)\n/)
+  assert.ok(!out.includes('0.2.0.md'), 'a 0.2.0 project (SILMARI.md has the Running section) does not get the 0.2.0 note')
   const sk = readFileSync(resolve(d, 'SILMARI.md'), 'utf8')
   assert.match(sk, /^# SILMARI\n\nIntro kept\.\n\n## Notation\n\nSix symbols/, 'head kept, generated section replaced')
   assert.match(sk, /## Running a call\n\n1\. If the calling heading/); assert.match(sk, /## Subagents\n\nA step whose heading/)
@@ -200,6 +201,15 @@ test('update: refreshes the generated sections of SILMARI.md, moves Migration to
   const mig = run('migrate', d).stdout
   assert.match(mig, /Created: \.sil\/migration\.md\nAppended: AGENTS\.md \(migration prompt\)\n$/, 'CLAUDE.md already has the line')
   assert.match(run('update', resolve(tmpdir())).stderr, /no \.sil\/ found above/)
+  // A 0.1.x project: a words block in the config, no Running section. It gets every note since, in order
+  const e = resolve(tmpdir(), `sil-update-old-${process.pid}`); rmSync(e, { recursive: true, force: true }); mkdirSync(resolve(e, '.sil'), { recursive: true })
+  writeFileSync(resolve(e, '.sil/config.yaml'), 'entry: [SILMARI.md]\nlang: ko\nwords:\n  inputs: [입력]\n')
+  writeFileSync(resolve(e, 'SILMARI.md'), '# SILMARI\n\n## Notation\n\n- old\n\n## Flow\n\n- [a](a.md)\n'); writeFileSync(resolve(e, 'a.md'), '# A\n'); writeFileSync(resolve(e, 'CLAUDE.md'), '# C\n')
+  const outE = run('update', e).stdout
+  assert.match(outE, /Created: \.sil\/updates\/0\.2\.0\.md\nCreated: \.sil\/updates\/0\.3\.0\.md\n/); assert.match(outE, /was 0\.1\.0, inferred/)
+  assert.match(readFileSync(resolve(e, '.sil/updates/0.2.0.md'), 'utf8'), /Contract headings[\s\S]*## \{\{>Inputs\}\}[\s\S]*Labels `\[…\]` → `\(\(…\)\)`/)
+  assert.match(readFileSync(resolve(e, 'SILMARI.md'), 'utf8'), /## Running a call/, 'the generated sections a 0.1.x file never had are added')
+  rmSync(e, { recursive: true, force: true })
   rmSync(d, { recursive: true, force: true })
 })
 
