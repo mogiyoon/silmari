@@ -5,6 +5,7 @@ import { findProjectRoot } from '@silmari/core'
 import { lint } from './lint.ts'
 import { init, update, migrate } from './init.ts'
 import { silVersion as version } from './version.ts'
+import { backup } from './backup.ts'
 import { view } from './view.ts'
 import { run } from './run.ts'
 
@@ -46,6 +47,9 @@ const usage = `sil <command> [dir] [options]
                     and records the version in .sil/config.yaml. Running it again changes nothing
   migrate [dir]     Writes .sil/migration.md again and puts the "Start the silmari migration?" line back into the start files,
                     to move documents to the notation later
+  backup [dir]      Copies every md file the scan sees to .sil/backups/<time>-manual/, keeping paths. init (with md files),
+                    migrate and update take one themselves before handing documents to an agent; the agent takes another
+                    right before editing. Nothing is deleted; copy a folder back to undo
   lint [dir]        Checks the md files and prints the problems. Exit code 0; with --strict, 1 when there is an error.
                     Without dir: the nearest folder above the current one that has .sil/, else the current folder
                       --strict          exit 1 on error    --json      print the graph and diagnostics as JSON
@@ -71,6 +75,7 @@ else switch (cmd) {
   case 'init': process.exitCode = init(args[0] ?? '.', { entry: opt('entry'), lang: opt('lang') }); break
   case 'update': process.exitCode = update(args[0] ?? '.'); break
   case 'migrate': process.exitCode = migrate(args[0] ?? '.'); break
+  case 'backup': process.exitCode = backup(args[0] ?? '.'); break
   case 'lint': lint(project(), { strict: flags.has('strict'), json: flags.has('json') }).then((c) => { process.exitCode = c }); break
   case 'view': view(project(), { port: opt('port') ? Number(opt('port')) : undefined, out: opt('out'), open: !flags.has('no-open') }).then((c) => { process.exitCode = c }); break
   default: process.stdout.write(usage); process.exitCode = cmd ? 2 : 0

@@ -48,6 +48,9 @@ export interface Edge {
   anchor?: string
   tools?: string[]      // {{+…}} on the call line: the tools the subagent may use, in the author's own words. Present only when written.
   model?: string        // {{#…}} on the call line: the model the subagent runs on, in the author's own words. Present only when written.
+  /** {{-…}} on the call line: run this subagent without the runtime's project start files (CLAUDE.md · AGENTS.md · …).
+   *  Absent by default, which means the subagent inherits them. The value is the author's own words. */
+  noRules?: string
 }
 
 /** range is a file-based byte offset in the file named by where (INV-8). Only diagnostics from links and markers have one. */

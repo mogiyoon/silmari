@@ -285,3 +285,31 @@ test('Isolation label: ((…)) at the heading end in any language; the old [ ] f
   assert.ok(!parseDoc('a.md', '# A\n\n## 1. Research ((use a subagent))\n\n[b](b.md)\n').diags.some((d) => d.code === 'L-I05'))
   assert.ok(!parseDoc('a.md', '# A\n\n## [서브 에이전트] 목록\n\n[b](b.md)\n').headings.find((x) => x.level === 2)!.subagent, '[subagent] inside a title is not a label')
 })
+
+test('{{-…}}: the start-file switch is free text on the call line, reaches the edge, and is a subagent-only marker (L-N26, L-N18)', () => {
+  const callee = '# B\n\n## {{>Inputs}}\n- x\n\n## {{<Outputs}}\n- y\n'
+  const g = buildGraph(new Map([
+    ['a.md', parseDoc('a.md', '# A\n\n## 1. 격리 ((서브에이전트))\n\n[b](b.md) 에 {{>x}} 를 주고 {{<y}} 를 받는다. {{+읽기}} 로, {{#빠른 모델}} 에서, {{-프로젝트 규칙 없이}} 실행한다.\n')],
+    ['b.md', parseDoc('b.md', callee)],
+  ]))
+  const e = g.edges.find((x) => x.to === 'b.md')!
+  assert.equal(e.noRules, '프로젝트 규칙 없이', 'the words inside are kept as written, spaces and all')
+  assert.equal(e.isolated, true)
+  assert.ok(!g.diagnostics.some((d) => d.code === 'L-N26'), 'on a subagent call it is exactly where it belongs')
+  assert.ok(!g.diagnostics.some((d) => d.code === 'L-N04'), 'free text, so the value-name syntax does not apply')
+
+  // Outside a subagent step it does nothing, like {{+…}} and {{#…}}
+  const plain = diagsOf({ 'a.md': '# A\n\n[b](b.md) 에 {{>x}} 를 주고 {{<y}} 를 받는다. {{-규칙 없이}}\n', 'b.md': callee })
+  assert.ok(plain.some((d) => d.code === 'L-N26' && d.severity === 'warning'))
+
+  // An empty marker is reported like every other empty marker
+  const empty = diagsOf({ 'a.md': '# A\n\n## 1. 격리 ((서브에이전트))\n\n[b](b.md) 에 {{>x}} 를 주고 {{<y}} 를 받는다. {{-}}\n', 'b.md': callee })
+  assert.ok(empty.some((d) => d.code === 'L-N18' && d.severity === 'warning'))
+
+  // A document without the marker carries nothing: the default is that the start files come along
+  const none = buildGraph(new Map([
+    ['a.md', parseDoc('a.md', '# A\n\n## 1. 보통 ((서브에이전트))\n\n[b](b.md) 에 {{>x}} 를 주고 {{<y}} 를 받는다.\n')],
+    ['b.md', parseDoc('b.md', callee)],
+  ]))
+  assert.equal(none.edges.find((x) => x.to === 'b.md')!.noRules, undefined)
+})

@@ -53,7 +53,7 @@ export function labelBox(e: SilEdge): { w: number; h: number } {
   // Head (condition heading + subagent badge) / body (fixed tag width + value chips) / foot (anchor)
   const under = rows.find((r) => r.kind === 'under'), anchor = rows.find((r) => r.kind === 'anchor')
   const head = under || e.isolated ? 22 : 0
-  const headW = (under ? textW(under.text) + 8 : 0) + (e.isolated ? 92 : 0)
+  const headW = (under ? textW(under.text) + 8 : 0) + (e.isolated ? 92 : 0) + (e.noRules ? 78 : 0)
   // Tools and model: one line of solid chips under the head
   // One row for the model, one for the tools; each row is a label and its chips
   const runRows = (e.model ? 1 : 0) + (e.tools?.length ? 1 : 0)

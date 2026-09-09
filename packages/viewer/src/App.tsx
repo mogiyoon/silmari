@@ -154,6 +154,7 @@ function SilEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, t
               <div className="lh">
                 <span className="lhx" title={t.headingOfCall}>{rows.find((r) => r.kind === 'under')?.text ?? ''}</span>
                 {e.isolated && <span className="badge iso">{t.subagent}</span>}
+                {e.noRules && <span className="badge norules" title={t.noRulesOf(e.noRules)}>{t.noRules}</span>}
               </div>
             )}
             {(e.tools?.length || e.model) && (
@@ -756,6 +757,7 @@ function Legend() {
       <div>{line('6 4', '#f87171')}<span>{t.legendMissing}</span></div>
       <div><i style={{ background: KIND.task.color }} /><span>{t.legendTask}</span><i style={{ background: KIND.doc.color }} /><span>{t.legendDoc}</span><i style={{ background: KIND.file.color }} /><span>{t.legendFile}</span><i style={{ background: KIND.ghost.color }} /><span>{t.legendGhost}</span></div>
       <div><i className="isoi" /><span>{t.legendSubagent}</span></div>
+      <div><i className="nri" /><span>{t.legendNoRules}</span></div>
     </div>
   )
 }
@@ -901,6 +903,7 @@ function Descendants({ graph, id, go, within }: { graph: Graph; id: string; go: 
         <Det key={c.id} k={`c:${c.id}`} className="child" style={{ marginLeft: depth * 12 }} summary={<>
             <span className="muted">{t.promptOf}</span><a onClick={(ev) => { ev.preventDefault(); go(c.id) }}>{c.title}</a> <code className="muted">{c.id}</code>
             {via.isolated && <span className="badge iso">{t.subagent}</span>}
+            {via.noRules && <span className="badge norules" title={t.noRulesOf(via.noRules)}>{t.noRules}</span>}
             {via.sends.length > 0 && <span className="muted"> {t.send} {via.sends.join(', ')}</span>}
             {via.returns.length > 0 && <span className="muted"> {t.receive} {via.returns.join(', ')}</span>}
           </>}>

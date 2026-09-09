@@ -11,7 +11,8 @@
 //     so every link target and every (path) value is rewritten to the root before it enters the prompt; `{{>name}}` inside a target is
 //     filled from --send and the file must exist. Before this, a document in agents/ linking ../references/x.md sent the subagent to a
 //     path that did not exist whenever the flow file sat in another folder (2026-09-08)
-//   · the runtime's project start files switched off, so a subagent's rules come only from links in its own document
+//   · the runtime's project start files (CLAUDE.md · AGENTS.md · …) left in place, as people expect, unless the call line says {{-…}};
+//     with that marker sil switches them off, so the step's rules come only from links in its own document
 //   · verification where the runtime reports what the model was given (Claude Code prints its tool list), honesty where it does not
 //   · a record of every run under .sil/run/, and a cached answer for an identical repeat
 // Measured on Claude Code and Codex CLI (2026-09-07): orchestrators typed the line correctly in every run once the Running section
@@ -26,8 +27,12 @@ import { parseDoc, findProjectRoot, resolve as resolveLink, type Link, type Doc 
 export interface Adapter {
   /** Executable name */
   exe: string
-  /** Base arguments. `{prompt}` is replaced by the assembled prompt. Includes machine-readable output and the start-file switch. */
+  /** Base arguments. `{prompt}` is replaced by the assembled prompt, `{noRules}` by noRulesFlags or by nothing.
+   *  Both are placeholders because the position matters: codex takes the prompt as a positional argument, so a flag cannot follow it. */
   base: string[]
+  /** Flags that switch this runtime's project start files off. Used only when the call line carries {{-…}}.
+   *  Empty when the runtime has no such switch: sil then refuses the step rather than running it with the rules still in. */
+  noRulesFlags: string[]
   /** Flags that really restrict tools, and flags that set the model. Presence checks only; values are never interpreted. */
   toolsFlags: string[]; modelFlags: string[]
   /** Flags that look like a restriction but are not. Refused with the reason so the orchestrator can retry. */
@@ -45,8 +50,9 @@ export interface Adapter {
 export const ADAPTERS: Record<string, Adapter> = {
   claude: {
     exe: 'claude',
+    base: ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '{noRules}'],
     // --setting-sources user: no CLAUDE.md injection (measured: self-report, token count and a behavioural rule all agree)
-    base: ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '--setting-sources', 'user'],
+    noRulesFlags: ['--setting-sources', 'user'],
     toolsFlags: ['--tools', '--disallowedTools', '--disallowed-tools'], modelFlags: ['--model'],
     rejected: { '--allowedTools': 'does not restrict tools; it only pre-approves permissions. Use --tools <Tool,Tool>.', '--allowed-tools': 'does not restrict tools; it only pre-approves permissions. Use --tools <Tool,Tool>.' },
     enforcement: 'tool-removal', verifies: true,
@@ -62,8 +68,10 @@ export const ADAPTERS: Record<string, Adapter> = {
   },
   codex: {
     exe: 'codex',
-    // -c project_doc_max_bytes=0: no AGENTS.md injection (measured). --skip-git-repo-check: a flow folder need not be a repository
-    base: ['exec', '--json', '--skip-git-repo-check', '-c', 'project_doc_max_bytes=0', '{prompt}'],
+    // --skip-git-repo-check: a flow folder need not be a repository
+    base: ['exec', '--json', '--skip-git-repo-check', '{noRules}', '{prompt}'],
+    // -c project_doc_max_bytes=0: no AGENTS.md injection (measured)
+    noRulesFlags: ['-c', 'project_doc_max_bytes=0'],
     toolsFlags: ['-s', '--sandbox'], modelFlags: ['-m', '--model'],
     rejected: {},
     enforcement: 'os-sandbox', verifies: false,
@@ -93,8 +101,12 @@ export const runUsage = (): string => `sil run <runtime> --step <flow.md>#<N> --
   The subagent starts in the project root (the folder with .sil/). Links in the called document and (path) values are rewritten
   to that root, so the paths it opens are the ones the document meant. {{>name}} inside a link target is filled from --send.
 
+  Project rules. The subagent keeps the runtime's project start files (CLAUDE.md · AGENTS.md · …), as people expect. To run a
+  step without them, write {{-…}} on the call line next to {{+tools}} and {{#model}}; sil then adds the runtime's switch itself.
+  The words inside are yours: {{-without the project rules}} {{-프로젝트 규칙 없이}}. A runtime with no such switch refuses the step.
+
   Runtimes and the flags that restrict tools (a flag that only pre-approves permissions is refused):
-${Object.entries(ADAPTERS).map(([n, a]) => `    ${n.padEnd(8)} ${a.example}\n${''.padEnd(13)}tools: ${a.toolsFlags.join(' / ')} · model: ${a.modelFlags.join(' / ')} · enforcement: ${a.enforcement} · ${a.verifies ? 'verified from the output' : 'not verifiable from the output'}`).join('\n')}
+${Object.entries(ADAPTERS).map(([n, a]) => `    ${n.padEnd(8)} ${a.example}\n${''.padEnd(13)}tools: ${a.toolsFlags.join(' / ')} · model: ${a.modelFlags.join(' / ')} · enforcement: ${a.enforcement} · ${a.verifies ? 'verified from the output' : 'not verifiable from the output'} · {{-…}}: ${a.noRulesFlags.length ? a.noRulesFlags.join(' ') : 'not supported'}`).join('\n')}
 `
 
 const fail = (msg: string): number => { process.stderr.write(`sil run: ${msg}\n`); return 1 }
@@ -153,6 +165,8 @@ export async function run(argv: string[]): Promise<number> {
   for (const [f, why] of Object.entries(ad.rejected)) if (hasFlag(rest, [f])) return fail(`${f} ${why}`)
   if (link.tools.length && !hasFlag(rest, ad.toolsFlags)) return fail(`the call line declares tools {{+${link.tools.join('}} {{+')}}} but no tools flag was given for ${rt} (${ad.toolsFlags.join(' / ')}).`)
   if (link.model && !hasFlag(rest, ad.modelFlags)) return fail(`the call line declares a model {{#${link.model}}} but no model flag was given for ${rt} (${ad.modelFlags.join(' / ')}).`)
+  // {{-…}} asks for a run without the project start files. A runtime that cannot do it must not run the step with the rules still in
+  if (link.noRules && !ad.noRulesFlags.length) return fail(`the call line says {{-${link.noRules}}}, but ${rt} has no switch for its project start files. They would still reach the subagent. Remove the marker to accept that, or run this step on a runtime that has one.`)
   // The called document: its body is the prompt, its contract types are checked
   const targetAbs = resolve(flowDir, link.target.split('#')[0])
   if (!existsSync(targetAbs)) return fail(`called file not found: ${link.target}`)
@@ -178,22 +192,26 @@ export async function run(argv: string[]): Promise<number> {
   }
   const body = stripFrontmatter(rewritten.text).trim()
   const shownValue = (k: string, s: { value: string }) => (target.contractTypes[k] === 'path' ? fromRoot(resolve(flowDir, s.value)) : s.value)
+  const opening = link.noRules
+    ? 'This session runs one isolated step of a flow. The project start files are switched off for it, so the document below and the values after it are everything this step needs. File paths are relative to the current working directory.'
+    : 'This session runs one step of a flow as a subagent. The document below and the values after it describe the step; the project rules you were started with still apply. File paths are relative to the current working directory.'
   const prompt = [
-    'This session runs one isolated step of a flow. The document below and the values after it are everything this step needs. File paths are relative to the current working directory.',
+    opening,
     '', body, '', '## Values for this run',
     ...[...sends].map(([k, s]) => `- ${k}:\n${shownValue(k, s)}`),
     '', '## Reply format', `Reply with only a JSON object whose keys are: ${link.returns.join(', ') || 'result'}`, '',
   ].join('\n')
   if (promptOnly) { process.stdout.write(prompt); return 0 }
-  const cmd = [ad.exe, ...ad.base.map((x) => (x === '{prompt}' ? prompt : x)), ...rest]
+  const cmd = [ad.exe, ...ad.base.flatMap((x) => (x === '{noRules}' ? (link.noRules ? ad.noRulesFlags : []) : [x === '{prompt}' ? prompt : x])), ...rest]
   const shown = cmd.map((x) => (x === prompt ? '"<prompt>"' : x)).join(' ')
   if (dry) { process.stdout.write(shown + '\n'); return 0 }
   if (!installed(ad.exe)) return fail(`${ad.exe} is not installed. Installed runtimes: ${Object.entries(ADAPTERS).filter(([, a]) => installed(a.exe)).map(([n]) => n).join(', ') || 'none'}`)
   // Records live under the project's .sil/run/. An identical repeat (same step, values, flags, and called document) is answered from the cache
   const runDir = join(root, '.sil', 'run'); mkdirSync(join(runDir, 'cache'), { recursive: true })
-  const key = createHash('sha1').update(JSON.stringify([rt, flow.rel, num, [...sends].map(([k, s]) => [k, s.value]), rest, target.hash])).digest('hex').slice(0, 16)
+  const key = createHash('sha1').update(JSON.stringify([rt, flow.rel, num, [...sends].map(([k, s]) => [k, s.value]), rest, link.noRules ?? '', target.hash])).digest('hex').slice(0, 16)
   const cachePath = join(runDir, 'cache', `${key}.json`)
-  process.stderr.write(`→ ${link.target} · ${rt} · ${rest.join(' ') || '(no flags)'} · enforcement ${ad.enforcement} · ${ad.verifies ? 'verified from the output' : 'unverified: this runtime does not report the tools or model it used'}\n`)
+  const rules = link.noRules ? `project rules cut ({{-${link.noRules}}})` : 'project start files inherited'
+  process.stderr.write(`→ ${link.target} · ${rt} · ${rest.join(' ') || '(no flags)'} · ${rules} · enforcement ${ad.enforcement} · ${ad.verifies ? 'verified from the output' : 'unverified: this runtime does not report the tools or model it used'}\n`)
   if (existsSync(cachePath)) { const c = JSON.parse(readFileSync(cachePath, 'utf8')) as { out: unknown; ran: string }; process.stderr.write(`· cached from ${c.ran}; nothing ran\n`); process.stdout.write(JSON.stringify(c.out) + '\n'); return 0 }
   const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-step${num}`
   mkdirSync(join(runDir, id), { recursive: true })

@@ -103,6 +103,7 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
     if (r.anchor) e.anchor = r.anchor
     if (l.tools.length) e.tools = l.tools
     if (l.model) e.model = l.model
+    if (l.noRules) e.noRules = l.noRules
     edges.push(e)
     const c = docs.get(rel)
     if (tgt.kind === 'task' && c && hasContract(c)) {
@@ -117,9 +118,9 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
     // A file that is called with values but declares nothing cannot be checked. The contract belongs in the called file (Migration rule 2)
     if (type === 'call' && c && !hasContract(c) && data)
       diags.push({ code: 'L-N22', severity: 'info', where, message: `${rel} is called with values but declares no {{>…}} / {{<…}} contract, so the names cannot be checked`, range })
-    // Tools and model apply to subagent runs only
-    if (type === 'call' && !l.isolated && (l.tools.length || l.model))
-      diags.push({ code: 'L-N26', severity: 'warning', where, message: `{{+…}} / {{#…}} on a call that is not a subagent step have no effect. Add a (( )) label to the heading, or remove them`, range })
+    // Tools, model and the start-file switch apply to subagent runs only
+    if (type === 'call' && !l.isolated && (l.tools.length || l.model || l.noRules))
+      diags.push({ code: 'L-N26', severity: 'warning', where, message: `{{+…}} / {{#…}} / {{-…}} on a call that is not a subagent step have no effect. Add a (( )) label to the heading, or remove them`, range })
     if (type === 'call' && l.isolated && !l.tools.length && !l.model)
       diags.push({ code: 'L-N25', severity: 'info', where, message: `Subagent call names no {{+tools}} or {{#model}}; it runs with whatever the caller passes`, range })
     if (type === 'call' && l.tools.length) {

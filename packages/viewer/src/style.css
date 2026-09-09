@@ -32,7 +32,7 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 .side h2 { font-size: 11px; color: #94a3b8; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .5px }
 .sub { color: #94a3b8; font-size: 12px }
 .badge { display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 4px; margin-left: 6px; background: #475569; color: #fff; vertical-align: middle }
-.badge.live { background: #059669 } .badge.bad { background: #dc2626 } .badge.iso { background: #7c3aed }
+.badge.live { background: #059669 } .badge.bad { background: #dc2626 } .badge.iso { background: #7c3aed } .badge.norules { background: #b45309 }
 .f { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; user-select: none }
 .f:hover { background: #334155 } .f code { color: #64748b }
 .dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0 }
@@ -84,7 +84,7 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 .resetbtn:hover { color: #e2e8f0 }
 .legend { position: absolute; left: 12px; bottom: 44px; z-index: 5; font-size: 11px; color: #cbd5e1; background: rgba(15,23,42,.85); border: 1px solid #334155; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px }
 .legend > div { display: flex; align-items: center; gap: 7px }
-.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px } .legend i.isoi { background: transparent; border: 2px solid #a78bfa; border-radius: 3px }
+.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px } .legend i.isoi { background: transparent; border: 2px solid #a78bfa; border-radius: 3px } .legend i.nri { background: #b45309 }
 .el .row { line-height: 18px; flex-wrap: wrap; gap: 4px }
 .el .row .tag { margin-right: 2px }
 .el .chip { display: inline-block; padding: 0 6px; border-radius: 4px; background: #1e293b; border: 1px solid #475569; color: #e2e8f0; font-size: 10.5px; line-height: 16px }
