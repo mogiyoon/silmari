@@ -183,10 +183,10 @@ test('update: refreshes the generated sections of SILMARI.md, moves Migration to
   const out = run('update', d).stdout
   assert.match(out, /Updated: SILMARI\.md \(Notation · Running a call · Subagents refreshed · Migration moved to \.sil\/migration\.md\)/)
   assert.match(out, /Updated: CLAUDE\.md \(migration line points at \.sil\/migration\.md\)/); assert.match(out, /Created: \.sil\/migration\.md/)
-  assert.match(out, /Backup: \.sil\/backups\/[0-9T-]+-update \(3 md files/); assert.match(out, /Created: \.sil\/updates\/0\.3\.0\.md/); assert.match(out, /Created: \.sil\/updates\/0\.4\.0\.md/); assert.match(out, /Appended: CLAUDE\.md \(update notes prompt\)/); assert.match(out, /Recorded: \.sil\/config\.yaml version \d+\.\d+\.\d+ \(was 0\.2\.0, inferred from what sil init wrote\)\n/)
+  assert.match(out, /Backup: \.sil\/backups\/[0-9T-]+-update \(3 md files/); assert.match(out, /Created: \.sil\/updates\/0\.3\.0\.md/); assert.match(out, /Created: \.sil\/updates\/0\.4\.0\.md/); assert.match(out, /Created: \.sil\/updates\/0\.5\.0\.md/); assert.match(out, /Appended: CLAUDE\.md \(update notes prompt\)/); assert.match(out, /Recorded: \.sil\/config\.yaml version \d+\.\d+\.\d+ \(was 0\.2\.0, inferred from what sil init wrote\)\n/)
   assert.ok(!out.includes('0.2.0.md'), 'a 0.2.0 project (SILMARI.md has the Running section) does not get the 0.2.0 note')
   const sk = readFileSync(resolve(d, 'SILMARI.md'), 'utf8')
-  assert.match(sk, /^# SILMARI\n\nIntro kept\.\n\n## Notation\n\nSeven symbols/, 'head kept, generated section replaced')
+  assert.match(sk, /^# SILMARI\n\nIntro kept\.\n\n## Notation\n\nEight symbols/, 'head kept, generated section replaced')
   assert.match(sk, /## Running a call\n\n1\. If the calling heading/); assert.match(sk, /## Subagents\n\nA step whose heading/)
   assert.match(sk, /## Flow\n\n- \[Feature work\]\(flow\.md\)\n\n## My rules\n\nBe brief\.\n\n- \[Late link\]\(flow\.md\)\n$/, 'user sections in their order; the line added after the old Migration section survives')
   assert.ok(!sk.includes('## Migration') && !sk.includes('## Agents'), 'Migration gone, and a heading inside its fenced example is not mistaken for a section')
@@ -195,8 +195,9 @@ test('update: refreshes the generated sections of SILMARI.md, moves Migration to
   assert.match(cl, /apply the update notes in \.sil\/updates\/: first tell the user[^\n]*then ask: "Start the silmari update\?"[^\n]*delete those files and this line/)
   assert.match(readFileSync(resolve(d, '.sil/updates/0.3.0.md'), 'utf8'), /^# silmari 0\.3\.0[\s\S]*## 1\. Tell the user first[\s\S]*Before: only md documents[\s\S]*## 2\. If yes/)
   assert.match(readFileSync(resolve(d, '.sil/config.yaml'), 'utf8'), /^entry: \[SILMARI\.md\]\nlang: ko\nversion: \d+\.\d+\.\d+/, 'the version line is added, the rest untouched')
-  assert.match(run('lint', d).stdout, /L-I07 +2 update notes not applied yet: 0\.3\.0\.md, 0\.4\.0\.md/)
+  assert.match(run('lint', d).stdout, /L-I07 +3 update notes not applied yet: 0\.3\.0\.md, 0\.4\.0\.md, 0\.5\.0\.md/)
   assert.match(readFileSync(resolve(d, '.sil/updates/0.4.0.md'), 'utf8'), /project start files[\s\S]*\{\{-…\}\}/, 'the 0.4.0 note explains the flipped default and the new marker')
+  assert.match(readFileSync(resolve(d, '.sil/updates/0.5.0.md'), 'utf8'), /Files as outputs and inputs[\s\S]*\{\{>report\}\}[\s\S]*\{\{<report\}\}[\s\S]*\{\{=Build the report\}\}/, 'the 0.5.0 note carries the file write/import values and {{=…}} sections that 0.4.0 shipped unannounced')
   const again = run('update', d).stdout
   assert.match(again, /Unchanged: SILMARI\.md\nUp to date: \d+\.\d+\.\d+\n$/)
   assert.equal(readFileSync(resolve(d, 'CLAUDE.md'), 'utf8'), cl, 'no second prompt line')

@@ -4,7 +4,8 @@
 // changed silmari's own files (SILMARI.md sections, config) needs none, since `sil update` rewrites those itself.
 // The facts come from the published packages: `sil init` of each npm version, diffed in order (0.1.0 → 0.1.1 label; 0.1.1 → 0.1.2 Migration
 // section only; 0.1.2 → 0.2.0 symbols, call-line tools/model, hints, sil run; 0.2.0 → 0.3.0 any-file links, template targets, root cwd;
-// 0.3.1 → 0.4.0 the {{-…}} marker and the flipped default for the runtime's project start files).
+// 0.3.1 → 0.4.0 the {{-…}} marker and the flipped default for the runtime's project start files, plus file write/import values and
+// {{=…}} execution sections, which 0.4.0 shipped without a note — the 0.5.0 note carries them).
 export const UPDATE_NOTES: Record<string, string> = {
   '0.1.1': `# silmari 0.1.1 — what changed
 
@@ -100,5 +101,29 @@ Then ask: "Start the silmari update?" If the answer is no, stop here and leave t
    - Now, when the step should keep judging by its own document alone: \`Use the tool {{+read}}, the model {{#fast}}, and run it {{-without the project rules}}.\`
 2. **Where a cut step needs a rule, link it.** Under \`{{-…}}\` the subagent's only rules are the links in its own document. If a rule in CLAUDE.md must still apply there, put it in its own document and link it from the called file: \`Follow the [writing rules](../RULES.md).\` Write it as an instruction, not as a note.
 3. Run \`sil lint\` until it reports error 0, then delete this file. Lint reports \`{{-…}}\` on a call that is not a subagent step as L-N26.
+`,
+  '0.5.0': `# silmari 0.5.0 — what changed
+
+## 1. Tell the user first
+
+In the user's language, in plain words. Each line is "before → now". The first two came in with 0.4.0 but were not announced then:
+
+- **Files as outputs and inputs.** Before: a file a step produced was only an output value (\`- report (path)\` under \`## {{<Outputs}}\`), and a file it read was a plain link. Now: on a link to a file that is not md, \`{{>name}}\` means the step writes that file — \`[the report](out/report.md) stores {{>report}}\` — and \`{{<name}}\` means it imports it — \`[the report](out/report.md) as {{<report}}\`. The graph draws \`task → file → task\`, so a producer and its consumers meet on one node. A path that exists only after a run is shown as a planned file, not as a broken link.
+- **Steps that run a command.** A heading \`## {{=Build the report}}\` marks a deterministic step: its first link (a script, a CLI) is what runs, and later file links with \`{{>name}}\` are what it writes. The shell commands stay in a code block; silmari draws them but never executes them.
+- **The graph.** Lines run at right angles, an import comes into its reader from above, and a label names both ends (\`caller.md → target.md\`, \`## Steps → ## Layers\`). Nothing to change in the documents for this.
+
+Then ask: "Start the silmari update?" If the answer is no, stop here and leave this file.
+
+## 2. If yes: what to change in the documents
+
+0. **Back up first.** Run \`sil backup\`; it copies every md file to a folder under \`.sil/backups/\` and prints the folder. Tell the user where it is. If the project is a git repository with uncommitted changes, commit first as well.
+1. **Files a step writes → a link with \`{{>name}}\`.** Where a document says it produces or saves a file, link the file and put the value on the link. Keep \`- name (path)\` under \`## {{<Outputs}}\` when the caller receives the path as a value; the two say different things.
+   - Before: \`Write the report to \\\`out/report.md\\\`.\`
+   - Now: \`Write [the report](out/report.md) and store {{>report}}.\`
+2. **Files a step reads back → a link with \`{{<name}}\`.** Where a document opens a file that another step produced, link it and name what it takes from it.
+   - Before: \`Read the report from the previous step.\`
+   - Now: \`Import [the report](out/report.md) as {{<report}}.\`
+3. **Command steps → a \`{{=…}}\` heading.** Where a step runs a script or a CLI rather than an agent, make its heading \`## {{=…}}\`, link what runs as the first link in that section, and leave the commands in a code block.
+4. Run \`sil lint\` until it reports error 0, then delete this file.
 `,
 }
