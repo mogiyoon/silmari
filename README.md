@@ -37,6 +37,8 @@ sil init                # .sil/config.yaml + SILMARI.md, and a line in CLAUDE.md
 sil lint                # read every md file, print what is wrong
 sil view                # open the graph in the browser; it redraws when a file changes
 sil update              # after upgrading silmari: refresh the generated parts of SILMARI.md and hand the agent the notes on what changed
+sil backup              # copy every md file the scan sees to .sil/backups/<time>-manual/ (init, migrate, update and the agent do this on their own)
+sil migrate             # put the migration rules (.sil/migration.md) and the question line in the start files back, to move documents later
 ```
 
 `sil init` records your language (`--lang=ko`, else the locale) in the config and in a line of each start file. SILMARI.md is generated in English; the language applies to what agents write from then on, documents and replies alike. silmari itself rewrites nothing.
@@ -153,9 +155,9 @@ Call [implement](implement.md) with {{>comments}} and receive {{<changed-files}}
 | `{{+read}}` | Tools the subagent may use, in your words | "Only these tools" |
 | `{{#fast}}` | Model the subagent runs on, in your words | "This model" |
 | `{{-without the project rules}}` | Run this subagent without the project start files (CLAUDE.md · AGENTS.md · …), in your words | "Ignore the project rules" |
+| `## {{=Run the CLI}}` | The first link in this section is executed, even with no values | "Run this target" |
 | `## … ((use a subagent via sil run))` | Calls in this section are isolated. The double parentheses are the symbol. The words inside can be in any language (`((서브 에이전트 사용))`) | "Use a subagent" |
 
-| `## {{=Run the CLI}}` | The first link in this section is executed, even with no values | "Run this target" |
 The sequence follows line order. A heading (`## If there are review comments`) marks a choice. To show repetition, call again under a condition such as "until", or use "for each".
 
 A link can point at any file, not only md: `[spec](../spec.json)`, `[log](out/run.log)`, a folder. Nothing but md is parsed. On a non-md file link, `{{>name}}` writes a value into the file and `{{<name}}` imports a value from it. A declared output path may be absent until runtime; the graph shows it as a planned file instead of a broken link.
@@ -163,8 +165,6 @@ A link can point at any file, not only md: `[spec](../spec.json)`, `[log](out/ru
 When the file depends on a value, the value goes inside the target: `[the reference](../references/{{>topic}}.md)`. The name is one of the document's inputs, or a value received from an earlier call. Lint checks that at least one file matches the pattern (L-N28) and that the name has a source (L-N29). `sil run` fills it from `--send` and refuses the step when the file is missing.
 
 In the called file, the contract is a list under a heading that contains exactly one marker: `## {{>Inputs}}` for inputs or `## {{<Outputs}}` for outputs. The heading can be at any level and use any words (`### {{>입력}}`). The item name is the first word. `(path)`, `(text)` or `(json)` after the name gives the value type. Any remaining text (`— the file to read`) describes the value for the model. No frontmatter is required. The only key silmari reads is `sil:` / `type: task|doc`, which overrides its task-or-reference guess.
-
-The hint tells the orchestrator what to put in `--send`. It also tells `sil run` what to check before starting the subagent:
 
 A deterministic task puts its execution target in a `{{=…}}` section. The first link in that section is called. A later non-md file link with `{{>name}}` is an output written by that target. Commands remain ordinary Markdown code: they appear in the document detail but do not become graph nodes.
 
@@ -182,6 +182,8 @@ uv run app gather --doc flows/out/doc0.json > flows/out/doc1.json
 ````
 
 This draws `task.md → app/cli.py → flows/out/doc1.json`. Another document imports the same node by linking the same normalized path with `{{<document}}`. A dynamic output such as `[result](flows/out/{{>job-id}}.json)` is one planned path-pattern node; matching concrete files appear after runtime. silmari does not execute the commands.
+
+The hint tells the orchestrator what to put in `--send`. It also tells `sil run` what to check before starting the subagent:
 
 | Hint on the item | What to send | Example | `sil run` checks |
 |---|---|---|---|
@@ -263,9 +265,9 @@ silmari does not touch the files. The agent moves the text. `sil lint` checks th
 | L-N28 | error | No file matches a template link such as `[x](refs/{{>topic}}.md)` |
 | L-N29 | warning | A value inside a link target is neither an input of the document nor received from a call |
 | L-N30 | warning | A link points outside the project root, where a subagent cannot reach it |
+| L-N31 | warning | A `{{=…}}` execution section has no target link |
 
 Rules that require a contract or call run only on documents that contain one. Plain Markdown stays quiet. The last line of `sil lint` always shows the type counts (`task 6 · call 7 …`). This makes a migration that changed nothing visible, even at error 0.
-| L-N31 | warning | A `{{=…}}` execution section has no target link |
 
 ## Running a step: sil run
 <!-- npm -->
@@ -289,9 +291,11 @@ Tests used Claude Code (sonnet, haiku) and Codex CLI. Once the Running section s
 - **Two scopes.** *Entry flows* starts from the files registered by `SILMARI.md`. The path is the agent start files (`CLAUDE.md` links `SILMARI.md`, so that edge is real) → the entry document → one box for each linked flow. A registration is a plain link; when the entry document calls its documents with values, it is a flow itself and is shown whole. ▸▸ on a box opens only that flow. A document also called by another flow has a `+1 outside` badge. The diagnostics panel shows how many findings are in hidden documents. *All md files* shows the same graph grouped by links. Both scopes are visibility filters over the graph printed by `sil lint --json`. Nothing is drawn unless it exists in the files.
 - **Flows.** Documents that link to one another form a flow. In the *All md files* scope, an overview map appears when there is more than one flow. Open a flow to view it.
 - **Folding.** A flow opens folded to its first level. On a node, ▸ shows its children, ▸▸ shows everything below it, and ◂ folds it again. The rail buttons ▸▸ / ◂◂ apply to the whole flow. The fold state is saved in `.sil/layout.json`.
-- **Lines.** Solid lines are calls that carry values. The label shows the sent and received values and the heading that contains the call. Dashed lines are references. A purple border marks a subagent call, and an amber `no rules` badge beside it marks one that runs without the project start files (`{{-…}}`). Red dashed lines lead to files that do not exist. Grey dotted pills are linked files that are not md (json, log, a folder): shown and checked, never parsed. A template link (`refs/{{>topic}}.md`) is one pill whose description lists the files it can match.
-- **Labels in two orders.** ⌥ places each label beside its target node. ☰ keeps the document's line order. Use the rail to switch between them.
-- **Selection.** Click a node to open its prompt on the right, every heading unfolded. The documents it calls sit below in one folded group, each with its own prompt. A file that is not md shows its text, read-only. Everything except that node and its neighbours fades. Click empty space to clear the selection.
+- **Lines.** Solid grey lines are calls; `=` makes the first link in its section a call even without values. Teal lines carry file data: the arrow direction and `write` / `import` label distinguish the operation. Dashed lines are references. A purple border marks a subagent call. An amber `no rules` strip at the top of an edge label marks that invocation as running without the project start files (`{{-…}}`); its tooltip gives the source phrase. Red dashed lines lead to missing targets. Grey dotted pills are existing linked files that are not md; a hollow grey pill is a planned runtime output. A template link (`out/{{>job-id}}.json`) is one path-pattern pill whose description lists matching files.
+- **Routes.** Every line runs at right angles with rounded corners. Its vertical parts stay in the margin between a column of nodes and the column of labels, so a line never runs under a label or through an expanded node. A call leaves the caller's right side, passes through its label and enters the target's left side; a reference with nothing to label bends once. A link back to an earlier column takes a clear lane between the nodes. An import comes in from above: the reader keeps an empty row over itself for the import labels, and a file that nothing writes stands in that row right over its first reader.
+- **Labels.** The first line of a label names the link, `caller.md → target.md`; the second names it at heading level, `## Steps → ## Layers` (the heading the link sits under → the heading its anchor points to, resolved to that heading's title). Below come the model and tools of a subagent call, then the values sent and received. Drag a label to move it; the line follows. ↺ puts it back.
+- **Labels in two orders.** ⌥ places each label beside its target node. ☰ keeps the document's line order, and a child moves down under the labels of the repeat calls before it, so the first call to each child stays a straight line. Use the rail to switch between them.
+- **Selection.** Click a node to open its prompt on the right, every heading unfolded. The documents it calls sit below in one folded group, each with its own prompt. A file that is not md shows its text, read-only. Everything except that node and its neighbours fades. Click a heading box inside an expanded node to keep only that heading's calls and the documents they reach; hovering a heading box lights the same without fading the rest. Click empty space to clear the selection.
 - **Editing.** *Edit ✎* opens the body of every heading in the selected document and the documents it calls as text fields. One Save writes each field back to its own heading. *Raw ✎* edits the whole file. Both use a writer that checks the file hash and keeps a backup. They never touch bytes outside your changes.
 - **Scale.** Tens of thousands of documents work. Only changed files are parsed again. The graph is sent gzipped. Above 2,000 visible nodes, the distant view uses WebGL, while the DOM contains only what is on screen.
 
