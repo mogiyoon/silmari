@@ -17,7 +17,7 @@ test('lint: reports the two known corpus issues. It exits 0 by default', () => {
   assert.equal(r.status, 0)
   assert.match(r.stdout, /error 2 · warning 0 · info 2/)
   assert.match(r.stdout, /L-N01/)
-  assert.match(r.stdout, /files 8 · task 6 · doc 2 · file 0 · ghost 1 · call 7 · ref 5 · mention 2/, 'the kind summary is always printed')
+  assert.match(r.stdout, /files 8 · task 6 · doc 2 · file 0 · ghost 1 · call 7 · read 0 · write 0 · ref 5 · mention 2/, 'the kind summary is always printed')
 })
 
 test('lint --strict: exits 1 when there is an error', () => {
@@ -26,7 +26,7 @@ test('lint --strict: exits 1 when there is an error', () => {
 
 test('lint --json: graph matches the expected result', () => {
   const g = JSON.parse(run('lint', AFTER, '--json').stdout)
-  assert.equal(g.spec, 'v4')
+  assert.equal(g.spec, 'v5')
   assert.equal(g.stats.nodes, 9)
 })
 
@@ -49,7 +49,7 @@ test('view --out: one HTML file containing the IR', { skip: !existsSync(resolve(
   const r = run('view', AFTER, `--out=${out}`)
   assert.equal(r.status, 0)
   const html = readFileSync(out, 'utf8')
-  assert.match(html, /window\.__SIL_GRAPH__=\{"spec":"v4"/)
+  assert.match(html, /window\.__SIL_GRAPH__=\{"spec":"v5"/)
   assert.ok(!html.includes('</script></head>') || html.indexOf('__SIL_GRAPH__') < html.indexOf('</head>'))
   rmSync(out)
 })

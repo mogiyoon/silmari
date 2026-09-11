@@ -3,7 +3,7 @@
 
 /** file: a linked file that is not Markdown (json, log, …) or a template link's stand-in. Shown in the graph, checked for existence, never parsed. */
 export type NodeKind = 'task' | 'doc' | 'file' | 'ghost'
-export type EdgeType = 'call' | 'mention' | 'ref'
+export type EdgeType = 'call' | 'mention' | 'ref' | 'read' | 'write'
 export type Severity = 'error' | 'warning' | 'info'
 
 /** Source byte range converted from an mdast UTF-16 offset (INV-8). */
@@ -16,6 +16,8 @@ export interface Heading {
   level: number; text: string; line: number; subagent: boolean; body: string; range: Range
   /** Set when the heading is a contract heading: `## {{>…}}` (inputs) or `## {{<…}}` (outputs). The text is the words inside the braces. */
   contract?: 'in' | 'out'
+  /** Set when the whole heading is `{{=…}}`. The first link in its section is an execution target. */
+  execution?: true
 }
 
 /** A type hint on a contract item: `- marker (path) — …`. `path` values are checked for existence by `sil run`; `json` must parse; `text` (the default) is not checked. */
@@ -32,6 +34,8 @@ export interface Node {
   headings: Heading[]   // The accordion tree.
   contract: Contract | null
   hash: string
+  /** Present on linked non-Markdown files. A planned file has a declared writer and may not exist until runtime. */
+  file?: { exists: boolean; planned: boolean; template?: boolean; matches?: number }
 }
 
 /** range is the byte range occupied by the whole link in the from file (INV-8). Writer changes only this range. */
@@ -51,6 +55,8 @@ export interface Edge {
   /** {{-…}} on the call line: run this subagent without the runtime's project start files (CLAUDE.md · AGENTS.md · …).
    *  Absent by default, which means the subagent inherits them. The value is the author's own words. */
   noRules?: string
+  /** The Markdown file that declares this edge. Normally this is `from`; read/write edges can start at a file or executable instead. */
+  declaredIn?: string
 }
 
 /** range is a file-based byte offset in the file named by where (INV-8). Only diagnostics from links and markers have one. */
@@ -58,7 +64,7 @@ export interface Diagnostic { code: string; severity: Severity; where: string; m
 
 /** entry contains the entry points from .sil/config.yaml and the batch roots. If there are none, the key is absent. */
 export interface Graph {
-  spec: 'v4'
+  spec: 'v5'
   entry?: string[]
   stats: {
     files: number; nodes: number; edges: number; diagnostics: number

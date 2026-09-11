@@ -1,6 +1,6 @@
 // Reads the title, description, heading tree, links, data, and contract from a file. Design document §1 and §2.
 // Every marker is a symbol, so the parser never depends on a language: `[ ]( )` call · `{{>}}` send / input contract heading ·
-// `{{<}}` receive / output contract heading · `{{+}}` tools · `{{#}}` model · `{{-}}` run without the project start files · `(( ))` subagent.
+// `{{<}}` receive / output contract heading · `{{=}}` execution heading · `{{+}}` tools · `{{#}}` model · `{{-}}` run without the project start files · `(( ))` subagent.
 // The words inside them are free.
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
@@ -24,6 +24,8 @@ const ANCHOR = /\s*\{#([^}]+)\}\s*$/
 // A contract heading is exactly one marker: `## {{>Inputs}}` `## {{<출력}}`. The words inside are the heading text.
 const CONTRACT_HEAD = /^\{\{([<>])([^}]*)\}\}$/
 const CONTRACT_HEAD_PREFIX = /^\{\{[<>][^}]*\}\}\s*\S/
+const EXEC_HEAD = /^\{\{=([^}]*)\}\}$/
+const EXEC_HEAD_PREFIX = /^\{\{=[^}]*\}\}\s*\S/
 const MARK = /\{\{([<>*+#-])([^}]*)\}\}/g
 /** A value inside a link target: `[doc](../references/{{>topic}}.md)`. Filled from the document's own inputs when the step runs. */
 export const PARAM = /\{\{>([^}]*)\}\}/g
@@ -40,6 +42,8 @@ export interface Link {
   /** `{{-…}}` after the link: run this subagent without the runtime's project start files (CLAUDE.md · AGENTS.md · …).
    *  Null when the marker is absent, which is the default: a subagent inherits them, as people expect. The words inside are the author's. */
   noRules: string | null
+  /** `{{=…}}` section membership. The first link in the section is its execution target. */
+  execution: { section: number; target: boolean } | null
   under: string[]; isolated: boolean; refstyle: boolean
 }
 export interface Diag { code: string; severity: 'error' | 'warning' | 'info'; where: string; message: string; range?: Range }
@@ -106,8 +110,9 @@ export function parseDoc(rel: string, src: string): Doc {
   const ig = /^<!--\s*sil:ignore\s+([A-Z0-9-]+(?:\s*,\s*[A-Z0-9-]+)*)\s*-->/.exec(body.trimStart())
   if (ig) for (const c of ig[1].split(',')) doc.ignores.add(c.trim())
   const L = (n: { position?: { start: { line: number } } }) => (n.position?.start.line ?? 0) + bodyLineOffset
-  const stack: { level: number; text: string; iso: boolean }[] = []
+  const stack: { level: number; text: string; iso: boolean; execution: number | null }[] = []
   let curContract: 'in' | 'out' | null = null
+  const executionTargets = new Set<number>()
   let descDone = false
   let h1s = 0
   const rawLines = body.split('\n')
@@ -118,6 +123,7 @@ export function parseDoc(rel: string, src: string): Doc {
   const handleBlock = (phrasing: PhrasingContent[], line: number) => {
     const under = stack.map((h) => h.text)
     const iso = stack.length ? stack[stack.length - 1].iso : false
+    const execution = stack.length ? stack[stack.length - 1].execution : null
     let last: Link | null = null
     for (const n of inline(phrasing)) {
       if (n.type === 'link' || n.type === 'linkReference') {
@@ -139,8 +145,12 @@ export function parseDoc(rel: string, src: string): Doc {
           else if (!NAME.test(name)) doc.diags.push({ code: 'L-N04', severity: 'error', where: `${rel}:${line}`, message: `Invalid name: {{>${name}}}`, range })
           else params.push(name)
         }
+        const isExecutionTarget = execution !== null && !executionTargets.has(execution)
+        if (isExecutionTarget) executionTargets.add(execution)
         last = { text, target: decodeURIComponent(target), line, range, params,
-                 sends: [], returns: [], tools: [], model: null, noRules: null, under, isolated: iso, refstyle: n.type === 'linkReference' }
+                 sends: [], returns: [], tools: [], model: null, noRules: null,
+                 execution: execution === null ? null : { section: execution, target: isExecutionTarget },
+                 under, isolated: iso, refstyle: n.type === 'linkReference' }
         doc.links.push(last)
       } else if (n.type === 'text') {
         for (const m of n.value.matchAll(MARK)) {
@@ -183,6 +193,7 @@ export function parseDoc(rel: string, src: string): Doc {
       }
       // Contract heading: the whole heading is one marker. `## {{>Inputs}}` / `## {{<출력}}`
       let contract: 'in' | 'out' | undefined
+      let execution = false
       const ch = CONTRACT_HEAD.exec(clean)
       if (ch) {
         const inner = ch[2].trim()
@@ -191,12 +202,22 @@ export function parseDoc(rel: string, src: string): Doc {
         if (contract && n.depth === 1) doc.diags.push({ code: 'L-N19', severity: 'info', where: `${rel}:${L(n)}`, message: `A contract heading as H1. The H1 is the document title; contracts usually sit under it`, range: hrange })
       } else if (CONTRACT_HEAD_PREFIX.test(clean)) {
         doc.diags.push({ code: 'L-N20', severity: 'warning', where: `${rel}:${L(n)}`, message: `The heading starts with a contract marker but has more text after it, so it is not read as a contract. Make the whole heading the marker: ## {{>…}}`, range: hrange })
+      } else {
+        const rh = EXEC_HEAD.exec(clean)
+        if (rh) {
+          const inner = rh[1].trim()
+          if (!inner) doc.diags.push({ code: 'L-N18', severity: 'warning', where: `${rel}:${L(n)}`, message: 'Empty marker {{=}} in a heading: write the heading text inside, e.g. {{=Run the CLI}}', range: hrange })
+          else { execution = true; clean = inner }
+        } else if (EXEC_HEAD_PREFIX.test(clean)) {
+          doc.diags.push({ code: 'L-N20', severity: 'warning', where: `${rel}:${L(n)}`, message: 'The heading starts with an execution marker but has more text after it, so it is not read as execution. Make the whole heading the marker: ## {{=…}}', range: hrange })
+        }
       }
       doc.anchors.add(slug(clean))
       while (stack.length && stack[stack.length - 1].level >= n.depth) stack.pop()
       const iso = sub || (stack.length ? stack[stack.length - 1].iso : false)
-      stack.push({ level: n.depth, text: clean, iso })
-      doc.headings.push({ level: n.depth, text: clean, line: L(n), subagent: sub, body: '', range: { start: 0, end: 0 }, ...(contract ? { contract } : {}) })
+      const executionSection = execution ? L(n) : (stack.length ? stack[stack.length - 1].execution : null)
+      stack.push({ level: n.depth, text: clean, iso, execution: executionSection })
+      doc.headings.push({ level: n.depth, text: clean, line: L(n), subagent: sub, body: '', range: { start: 0, end: 0 }, ...(contract ? { contract } : {}), ...(execution ? { execution: true as const } : {}) })
       if (n.depth === 1) { h1s++; if (doc.title === null) doc.title = clean }
       if ([...inline(n.children)].some((c) => c.type === 'link' || c.type === 'linkReference'))
         doc.diags.push({ code: 'L-N05', severity: 'info', where: `${rel}:${L(n)}`, message: `A link inside a heading is not an edge: ${clean}` })

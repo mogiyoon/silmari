@@ -52,7 +52,7 @@ Here is what `sil lint` prints for the [demo corpus](packages/core/test/fixtures
 · flow.md:19     L-N25  Subagent call names no {{+tools}} or {{#model}}; it runs with whatever the caller passes
 
 error 2 · warning 0 · info 2
-files 8 · task 6 · doc 2 · file 0 · ghost 1 · call 7 · ref 5 · mention 2
+files 8 · task 6 · doc 2 · file 0 · ghost 1 · call 7 · read 0 · write 0 · ref 5 · mention 2
 ```
 
 The last line is the count of what was read. A migration that changed nothing is visible there even when there is no error.
@@ -155,15 +155,33 @@ Call [implement](implement.md) with {{>comments}} and receive {{<changed-files}}
 | `{{-without the project rules}}` | Run this subagent without the project start files (CLAUDE.md · AGENTS.md · …), in your words | "Ignore the project rules" |
 | `## … ((use a subagent via sil run))` | Calls in this section are isolated. The double parentheses are the symbol. The words inside can be in any language (`((서브 에이전트 사용))`) | "Use a subagent" |
 
+| `## {{=Run the CLI}}` | The first link in this section is executed, even with no values | "Run this target" |
 The sequence follows line order. A heading (`## If there are review comments`) marks a choice. To show repetition, call again under a condition such as "until", or use "for each".
 
-A link can point at any file, not only md: `[spec](../spec.json)`, `[log](out/run.log)`, a folder. The graph shows it as a file node and lint checks that it exists. Nothing but md is parsed. Every file an agent reads is a link, because a subagent receives files only through links; a file name in backticks is not a link and makes no edge. A file the step creates is an output value (`- report (path)` under `## {{<Outputs}}`), not a link.
+A link can point at any file, not only md: `[spec](../spec.json)`, `[log](out/run.log)`, a folder. Nothing but md is parsed. On a non-md file link, `{{>name}}` writes a value into the file and `{{<name}}` imports a value from it. A declared output path may be absent until runtime; the graph shows it as a planned file instead of a broken link.
 
 When the file depends on a value, the value goes inside the target: `[the reference](../references/{{>topic}}.md)`. The name is one of the document's inputs, or a value received from an earlier call. Lint checks that at least one file matches the pattern (L-N28) and that the name has a source (L-N29). `sil run` fills it from `--send` and refuses the step when the file is missing.
 
 In the called file, the contract is a list under a heading that contains exactly one marker: `## {{>Inputs}}` for inputs or `## {{<Outputs}}` for outputs. The heading can be at any level and use any words (`### {{>입력}}`). The item name is the first word. `(path)`, `(text)` or `(json)` after the name gives the value type. Any remaining text (`— the file to read`) describes the value for the model. No frontmatter is required. The only key silmari reads is `sil:` / `type: task|doc`, which overrides its task-or-reference guess.
 
 The hint tells the orchestrator what to put in `--send`. It also tells `sil run` what to check before starting the subagent:
+
+A deterministic task puts its execution target in a `{{=…}}` section. The first link in that section is called. A later non-md file link with `{{>name}}` is an output written by that target. Commands remain ordinary Markdown code: they appear in the document detail but do not become graph nodes.
+
+````markdown
+## {{=Document CLI}}
+
+[Document CLI](app/cli.py) receives {{>planfile}} and {{>specfile}}.
+
+[Gathered document](flows/out/doc1.json) stores {{>docfile}}.
+
+```bash
+uv run app expand --plan <planfile> --spec <specfile> > flows/out/doc0.json
+uv run app gather --doc flows/out/doc0.json > flows/out/doc1.json
+```
+````
+
+This draws `task.md → app/cli.py → flows/out/doc1.json`. Another document imports the same node by linking the same normalized path with `{{<document}}`. A dynamic output such as `[result](flows/out/{{>job-id}}.json)` is one planned path-pattern node; matching concrete files appear after runtime. silmari does not execute the commands.
 
 | Hint on the item | What to send | Example | `sil run` checks |
 |---|---|---|---|
@@ -247,6 +265,7 @@ silmari does not touch the files. The agent moves the text. `sil lint` checks th
 | L-N30 | warning | A link points outside the project root, where a subagent cannot reach it |
 
 Rules that require a contract or call run only on documents that contain one. Plain Markdown stays quiet. The last line of `sil lint` always shows the type counts (`task 6 · call 7 …`). This makes a migration that changed nothing visible, even at error 0.
+| L-N31 | warning | A `{{=…}}` execution section has no target link |
 
 ## Running a step: sil run
 <!-- npm -->
@@ -296,7 +315,7 @@ scan:
 
 There is no word list. Contract headings use the symbols `{{>…}}` / `{{<…}}`, so documents in every language are read the same way. `.sil/run/` contains `sil run` records and its cache. Add it and `.sil/layout.json` to `.gitignore`.
 
-`SILMARI.md` is the entry point that agents read first. It contains the notation summary and links to the entry documents. The `.sil/layout.json` file beside the config stores per-user viewer state, including dragged nodes, folds and open panels. Add it to `.gitignore`.
+`SILMARI.md` is the entry point that agents read first. It contains the notation summary and links to the entry documents. The `.sil/layout.json` file beside the config stores per-user viewer state, including dragged nodes, dragged edge-label positions, folds and open panels. Drag a label by its ⠿ handle; its ↺ button restores just that label's automatic position. Add the file to `.gitignore`.
 
 ## What it never does
 <!-- npm -->

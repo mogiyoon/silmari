@@ -39,7 +39,7 @@ Two principles hold everywhere: **the notation has no language** (every marker i
 
 ## Notation
 
-Seven symbols. The words inside them are free, in any language.
+Eight symbols. The words inside them are free, in any language.
 
 | Symbol | Meaning |
 |---|---|
@@ -49,12 +49,14 @@ Seven symbols. The words inside them are free, in any language.
 | \`{{+…}}\` | The tools the subagent may use, in your words: \`{{+read}}\` \`{{+파일 읽기}}\` |
 | \`{{#…}}\` | The model the subagent runs on, in your words: \`{{#fast}}\` \`{{#가장 작은 모델}}\` |
 | \`{{-…}}\` | Run this subagent without the project start files (CLAUDE.md · AGENTS.md · …), in your words: \`{{-without the project rules}}\` \`{{-프로젝트 규칙 없이}}\` |
+| \`## {{=Run the CLI}}\` | The first link in this section is executed, even when it carries no values |
 | \`## … ((…))\` | A double-parenthesis label at the end of a heading: the calls under it run as a subagent (isolated). \`((use a subagent via sil run))\` |
 
-- A link can point at any file: \`[spec](../spec.json)\`, \`[log](out/run.log)\`, a folder. The graph shows it and lint checks that it exists; nothing but md is parsed. Every file an agent reads is a link. A file name in backticks is not a link: it makes no edge and never reaches a subagent. A file the step creates is an output value (\`- report (path)\` under \`## {{<Outputs}}\`), not a link.
+- A link can point at any file: \`[spec](../spec.json)\`, \`[log](out/run.log)\`, a folder. Nothing but md is parsed. On a non-md file link, \`{{>name}}\` writes the value into the file and \`{{<name}}\` imports it. A declared output path may be absent until runtime; the graph shows a planned file instead of a broken link.
 - A link target may hold a value: \`[the reference](../references/{{>topic}}.md)\`. The value is one of this document's inputs, or a value received from an earlier call, and is filled in when the step runs. Lint checks that at least one file matches the pattern.
 - A condition is a heading. Calls under \`## If the review is major\` happen under that condition. A heading that calls an earlier document again must state when it ends.
 - In the called document, the contract is a list under a heading that is exactly one marker: \`## {{>Inputs}}\` for inputs, \`## {{<Outputs}}\` for outputs. Any heading level, any words: \`### {{>입력}}\`. The item name is the first word; an optional \`(path)\`, \`(text)\` or \`(json)\` after it says what kind of value it is (\`- posting (path) — the file to read\`). Say whether a value is a path or the content itself; agents confuse the two.
+- A deterministic task uses a heading such as \`## {{=Run the CLI}}\`. The first link in that section is the execution target. Later non-md file links with \`{{>name}}\` are files written by that target; links with \`{{<name}}\` import files. Keep the exact shell commands in an ordinary code block. silmari draws real and planned file nodes but does not execute the commands.
 - A document is a task when it sends or receives values, is called with values, or has a contract. Otherwise it is a reference. To override the guess, the only frontmatter silmari reads: \`sil:\` then \`  type: task\` (or \`doc\`).
 - The condition of a call is every heading above it, the H1 included. Value names are one word; the label inside \`(( ))\` is written like an instruction to the model.
 

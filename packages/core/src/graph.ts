@@ -27,6 +27,7 @@ const fmt = (xs: string[]) => `[${xs.map((x) => `'${x}'`).join(', ')}]`
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const hasData = (l: Link) => l.sends.length + l.returns.length > 0
 const hasContract = (d: Doc) => d.contractIn.length + d.contractOut.length > 0
+const hasExecution = (d: Doc) => d.headings.some((h) => h.execution)
 const contractOf = (d: Doc): Contract | null => {
   if (!hasContract(d)) return null
   const c: Contract = { inputs: d.contractIn, outputs: d.contractOut }
@@ -45,32 +46,56 @@ export interface BuildOptions {
 }
 
 export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Graph {
-  const calledWithData = new Set<string>()
-  for (const d of docs.values()) for (const l of d.links) {
+  // One execution section has one target: its first link. A later linked file with a sent value is written by that target.
+  const executionTargets = new Map<string, string>()
+  const executionKey = (d: Doc, l: Link) => `${d.rel}:${l.execution?.section ?? 0}`
+  for (const d of docs.values()) for (const l of d.links) if (l.execution?.target) {
     const r = resolve(d.rel, l.target)
-    if (r.kind === 'md' && hasData(l)) calledWithData.add(r.rel!)
+    if (r.rel) executionTargets.set(executionKey(d, l), r.rel)
+  }
+  const plannedFiles = new Set<string>()
+  for (const d of docs.values()) for (const l of d.links) {
+    if (l.execution?.target || !l.sends.length) continue
+    const r = resolve(d.rel, l.target)
+    if (r.rel && (r.kind === 'other' || !!l.execution)) plannedFiles.add(r.rel)
+  }
+
+  const calledWithData = new Set<string>()
+  for (const d of docs.values()) for (const l of plannedFiles.has(d.rel) ? [] : d.links) {
+    const r = resolve(d.rel, l.target)
+    if (r.kind === 'md' && (hasData(l) || l.execution?.target)) calledWithData.add(r.rel!)
   }
   // A task: it calls with values, is called with values, or declares a contract. `sil: type` in the frontmatter overrides the guess.
   const isTask = (d: Doc) => {
     const t = d.fm['type']
     if (t === 'task' || t === 'doc') return t === 'task'
-    return d.links.some(hasData) || calledWithData.has(d.rel) || hasContract(d)
+    return d.links.some((l) => hasData(l) || !!l.execution?.target) || calledWithData.has(d.rel) || hasContract(d) || hasExecution(d)
   }
 
   const nodes = new Map<string, Node>()
   const edges: Edge[] = []
   const diags: Diagnostic[] = []
   for (const d of docs.values()) {
+    if (plannedFiles.has(d.rel)) {
+      nodes.set(d.rel, { id: d.rel, kind: 'file', title: d.rel, desc: '', headings: [], contract: null, hash: d.hash, file: { exists: true, planned: true } })
+      continue
+    }
     nodes.set(d.rel, { id: d.rel, kind: isTask(d) ? 'task' : 'doc', title: d.title ?? d.rel, desc: d.desc, headings: d.headings, contract: contractOf(d), hash: d.hash })
     const task = nodes.get(d.rel)!.kind === 'task'
     for (const x of d.diags) if (task || !(x.code === 'L-N05' || x.code === 'L-N06')) diags.push(x)
   }
+  // One execution section has one target: its first link. Other linked files in that section can be declared outputs.
+  // The target remains its ordinary file node; no synthetic run or artifact nodes are created.
+  for (const d of docs.values()) for (const h of d.headings) if (h.execution && !executionTargets.has(`${d.rel}:${h.line}`))
+    diags.push({ code: 'L-N31', severity: 'warning', where: `${d.rel}:${h.line}`, message: 'An {{=…}} execution section has no target link' })
+
+  // A declared write is allowed to point at a file that does not exist yet. It is a planned file, not a broken link.
   // Tool sets per called file, to spot a file that is called with different tools from different places (L-N24)
   const toolSets = new Map<string, Map<string, string>>()
   const viaTemplate = new Set<string>() // files a template link can match: reached at run time, so not orphans (L-G01)
   const ghost = (rel: string) => nodes.set(rel, { id: rel, kind: 'ghost', title: rel, desc: '', headings: [], contract: null, hash: '' })
-  const plain = (rel: string, kind: 'doc' | 'file', desc: string) => nodes.set(rel, { id: rel, kind, title: rel, desc, headings: [], contract: null, hash: '' })
-  for (const d of docs.values()) for (const l of d.links) {
+  const plain = (rel: string, kind: 'doc' | 'file', desc: string, file?: Node['file']) => nodes.set(rel, { id: rel, kind, title: rel, desc, headings: [], contract: null, hash: '', ...(file ? { file } : {}) })
+  for (const d of docs.values()) for (const l of plannedFiles.has(d.rel) ? [] : d.links) {
     const r = resolve(d.rel, l.target)
     if (r.kind === 'self' || r.kind === 'external') continue
     const rel = r.rel!, where = `${d.rel}:${l.line}`, data = hasData(l), range = l.range
@@ -83,11 +108,14 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
         const matches = [...new Set([...[...docs.keys()].filter((k) => re.test(k)), ...(opts.glob?.(rel) ?? [])])].sort(cmp)
         const checkable = r.kind === 'md' || opts.glob !== undefined
         for (const m of matches) viaTemplate.add(m)
-        if (matches.length || !checkable) nodes.set(rel, { id: rel, kind: r.kind === 'md' ? (data ? 'task' : 'doc') : 'file', title: rel, desc: matches.length ? `matches ${matches.length}: ${matches.slice(0, 5).join(', ')}${matches.length > 5 ? ', …' : ''}` : '', headings: [], contract: null, hash: '' })
+        if (matches.length || !checkable || plannedFiles.has(rel)) nodes.set(rel, { id: rel, kind: plannedFiles.has(rel) ? 'file' : r.kind === 'md' ? (data ? 'task' : 'doc') : 'file', title: rel,
+          desc: matches.length ? `matches ${matches.length}: ${matches.slice(0, 5).join(', ')}${matches.length > 5 ? ', …' : ''}` : plannedFiles.has(rel) ? 'planned output pattern — resolved at runtime' : '',
+          headings: [], contract: null, hash: '', ...((r.kind === 'other' || plannedFiles.has(rel)) ? { file: { exists: matches.length > 0, planned: plannedFiles.has(rel), template: true, matches: matches.length } } : {}) })
         else { ghost(rel); diags.push({ code: 'L-N28', severity: 'error', where, message: `No file matches the template link: ${l.target}`, range }) }
-      } else if (r.kind === 'other') {
+      } else if (r.kind === 'other' || plannedFiles.has(rel)) {
         // Any file can be linked (json, log, a folder …). It is shown and checked, never parsed. Without an exists callback it is taken to exist
-        if (opts.exists === undefined || opts.exists(rel)) plain(rel, 'file', '')
+        const exists = opts.exists === undefined || opts.exists(rel)
+        if (exists || plannedFiles.has(rel)) plain(rel, 'file', !exists ? 'planned output — created at runtime' : '', { exists, planned: plannedFiles.has(rel) })
         else { ghost(rel); diags.push({ code: 'L-N01', severity: 'error', where, message: `Linked file not found: ${l.target}`, range }) }
       } else if (opts.exists?.(rel)) plain(rel, 'doc', 'excluded from scan — the file exists')
       else { ghost(rel); diags.push({ code: 'L-N01', severity: 'error', where, message: `Linked file not found: ${l.target}`, range }) }
@@ -96,17 +124,25 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
     const tdoc = docs.get(rel)
     if (r.anchor && tdoc && !tdoc.anchors.has(r.anchor))
       diags.push({ code: 'L-N09', severity: 'error', where, message: `Anchor not found in the target document: ${l.target}`, range })
+    const fileTarget = r.kind === 'other' || plannedFiles.has(rel)
+    const executionTarget = !!l.execution?.target
+    const writesFile = fileTarget && !executionTarget && l.sends.length > 0
+    const readsFile = fileTarget && !executionTarget && !writesFile && l.returns.length > 0
     const reference = tgt.kind === 'doc' || tgt.kind === 'file'
-    const type: Edge['type'] = tgt.kind === 'task' && data ? 'call' : reference ? 'ref' : data ? 'call' : 'mention'
-    if (reference && data) diags.push({ code: 'L-N14', severity: 'warning', where, message: `Data attached to a reference document: ${l.target}`, range })
-    const e: Edge = { from: d.rel, to: rel, type, line: l.line, under: l.under, sends: l.sends, returns: l.returns, isolated: l.isolated, range: l.range }
+    const type: Edge['type'] = executionTarget ? 'call' : writesFile ? 'write' : readsFile ? 'read' : tgt.kind === 'task' && data ? 'call' : reference ? 'ref' : data ? 'call' : 'mention'
+    if (reference && data && !fileTarget) diags.push({ code: 'L-N14', severity: 'warning', where, message: `Data attached to a reference document: ${l.target}`, range })
+    const producer = l.execution ? executionTargets.get(executionKey(d, l)) : d.rel
+    const from = writesFile ? (producer ?? d.rel) : readsFile ? rel : d.rel
+    const to = writesFile ? rel : readsFile ? d.rel : rel
+    const e: Edge = { from, to, type, line: l.line, under: l.under, sends: l.sends, returns: l.returns, isolated: l.isolated, range: l.range,
+      ...((writesFile || readsFile) ? { declaredIn: d.rel } : {}) }
     if (r.anchor) e.anchor = r.anchor
     if (l.tools.length) e.tools = l.tools
     if (l.model) e.model = l.model
     if (l.noRules) e.noRules = l.noRules
     edges.push(e)
     const c = docs.get(rel)
-    if (tgt.kind === 'task' && c && hasContract(c)) {
+    if (type === 'call' && tgt.kind === 'task' && c && hasContract(c)) {
       const sent = [...new Set(l.sends)]
       const notIn = sent.filter((x) => !c.contractIn.includes(x)).sort(cmp)
       if (c.contractIn.length && sent.length && notIn.length)
@@ -131,19 +167,25 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
   for (const [rel, sets] of toolSets) if (sets.size > 1)
     diags.push({ code: 'L-N24', severity: 'info', where: rel, message: `Called with different tool sets: ${[...sets.keys()].map((s) => `[${s}]`).join(' vs ')}` })
   for (const d of docs.values()) {
+    if (plannedFiles.has(d.rel)) continue
     const recv = new Map<string, string[]>()
+    const imported = new Set<string>()
     const sentNames = new Set<string>()
     const calls = new Map<string, Link[]>()
     for (const l of d.links) {
-      for (const n of l.returns) recv.set(n, [...(recv.get(n) ?? []), l.under.join('\0') /* A separator that cannot appear in a heading. Used to compare conditions. */])
-      for (const n of l.sends) sentNames.add(n)
       const r = resolve(d.rel, l.target)
-      if (r.kind === 'md' && hasData(l)) calls.set(r.rel!, [...(calls.get(r.rel!) ?? []), l])
+      const fileTarget = r.kind === 'other' || (!!r.rel && plannedFiles.has(r.rel))
+      const fileWrite = fileTarget && !l.execution?.target && l.sends.length > 0
+      const fileRead = fileTarget && !l.execution?.target && !fileWrite && l.returns.length > 0
+      if (fileRead) for (const n of l.returns) imported.add(n)
+      if (!fileWrite) for (const n of l.returns) recv.set(n, [...(recv.get(n) ?? []), l.under.join('\0') /* A separator that cannot appear in a heading. Used to compare conditions. */])
+      if (!fileWrite && !fileRead) for (const n of l.sends) sentNames.add(n)
+      if (r.rel && (l.execution?.target || (r.kind === 'md' && hasData(l)))) calls.set(r.rel, [...(calls.get(r.rel) ?? []), l])
     }
     for (const [n, unders] of recv) {
       if (new Set(unders).size !== unders.length) diags.push({ code: 'L-N16', severity: 'error', where: d.rel, message: `The same name is received twice under the same condition: ${n}` })
       // A received value is used if it is sent to the next call or returned by this document as an output.
-      else if (!sentNames.has(n) && !d.contractOut.includes(n)) diags.push({ code: 'L-N17', severity: 'info', where: d.rel, message: `A received value is never used: ${n}` })
+      else if (!imported.has(n) && !sentNames.has(n) && !d.contractOut.includes(n)) diags.push({ code: 'L-N17', severity: 'info', where: d.rel, message: `A received value is never used: ${n}` })
     }
     // The mirror of L-N17: a sent value that this document neither receives from a call nor declares in its own contract. Legitimate when the document makes the value itself, so info
     for (const n of [...sentNames].sort(cmp)) if (!recv.has(n) && !d.contractIn.includes(n) && !d.contractOut.includes(n))
@@ -176,7 +218,7 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
     return o
   }
   return {
-    spec: 'v4',
+    spec: 'v5',
     ...(opts.entry?.length ? { entry: opts.entry } : {}),
     stats: { files: docs.size, nodes: nodes.size, edges: edges.length, diagnostics: diags.length,
       nodesByKind: count(sortedNodes.map((n) => n.kind)), edgesByType: count(edges.map((e) => e.type)), diagnosticsBySeverity: count(diags.map((x) => x.severity)) },
