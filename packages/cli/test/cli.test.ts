@@ -17,7 +17,7 @@ test('lint: reports the two known corpus issues. It exits 0 by default', () => {
   assert.equal(r.status, 0)
   assert.match(r.stdout, /error 2 · warning 0 · info 2/)
   assert.match(r.stdout, /L-N01/)
-  assert.match(r.stdout, /files 8 · task 6 · doc 2 · file 0 · ghost 1 · call 7 · ref 5 · mention 2/, 'the kind summary is always printed')
+  assert.match(r.stdout, /files 8 · task 6 · doc 2 · file 0 · ghost 1 · call 7 · read 0 · write 0 · ref 5 · mention 2/, 'the kind summary is always printed')
 })
 
 test('lint --strict: exits 1 when there is an error', () => {
@@ -26,7 +26,7 @@ test('lint --strict: exits 1 when there is an error', () => {
 
 test('lint --json: graph matches the expected result', () => {
   const g = JSON.parse(run('lint', AFTER, '--json').stdout)
-  assert.equal(g.spec, 'v4')
+  assert.equal(g.spec, 'v5')
   assert.equal(g.stats.nodes, 9)
 })
 
@@ -49,7 +49,7 @@ test('view --out: one HTML file containing the IR', { skip: !existsSync(resolve(
   const r = run('view', AFTER, `--out=${out}`)
   assert.equal(r.status, 0)
   const html = readFileSync(out, 'utf8')
-  assert.match(html, /window\.__SIL_GRAPH__=\{"spec":"v4"/)
+  assert.match(html, /window\.__SIL_GRAPH__=\{"spec":"v5"/)
   assert.ok(!html.includes('</script></head>') || html.indexOf('__SIL_GRAPH__') < html.indexOf('</head>'))
   rmSync(out)
 })
@@ -151,7 +151,10 @@ test('init: creates SILMARI.md and makes all four agent start files refer to it;
   assert.equal(readFileSync(resolve(b, 'CLAUDE.md'), 'utf8'), '# CLAUDE\n\n[SILMARI.md](SILMARI.md) is the entry point of everything in this project. The notation and flow of every md document follow SILMARI.md. Read SILMARI.md first, before any work.\n')
   const d = resolve(tmpdir(), `sil-init-d-${process.pid}`); rmSync(d, { recursive: true, force: true }); mkdirSync(d)
   writeFileSync(resolve(d, 'AGENTS.md'), '# Codex\n'); writeFileSync(resolve(d, 'flow.md'), '# Flow\n\nWork.\n')
-  assert.match(run('init', d, '--lang=ja').stdout, /Appended: AGENTS\.md \(SILMARI\.md call · language ja · migration prompt\)/)
+  const initD = run('init', d, '--lang=ja').stdout
+  assert.match(initD, /Appended: AGENTS\.md \(SILMARI\.md call · language ja · migration prompt\)/)
+  assert.match(initD, /Backup: \.sil\/backups\/[0-9T-]+-migration \(3 md files/, 'documents, start files included, are copied before the agent is asked to move them')
+  assert.match(readFileSync(resolve(d, '.sil/migration.md'), 'utf8'), /0\. \*\*Back up first\.\*\* Run `sil backup`/)
   const ag = readFileSync(resolve(d, 'AGENTS.md'), 'utf8')
   assert.match(ag, /follow SILMARI\.md/); assert.match(ag, /language is "ja"/); assert.match(ag, /Start the silmari migration\?/)
   assert.match(ag, /Start the silmari migration\?[^\n]*follow \.sil\/migration\.md rule by rule[^\n]*then delete that file and this line from every agent start file/, 'the question line points at the migration document and says the agent removes both when done — silmari never does')
@@ -180,10 +183,10 @@ test('update: refreshes the generated sections of SILMARI.md, moves Migration to
   const out = run('update', d).stdout
   assert.match(out, /Updated: SILMARI\.md \(Notation · Running a call · Subagents refreshed · Migration moved to \.sil\/migration\.md\)/)
   assert.match(out, /Updated: CLAUDE\.md \(migration line points at \.sil\/migration\.md\)/); assert.match(out, /Created: \.sil\/migration\.md/)
-  assert.match(out, /Created: \.sil\/updates\/0\.3\.0\.md/); assert.match(out, /Appended: CLAUDE\.md \(update notes prompt\)/); assert.match(out, /Recorded: \.sil\/config\.yaml version \d+\.\d+\.\d+ \(was 0\.2\.0, inferred from what sil init wrote\)\n/)
+  assert.match(out, /Backup: \.sil\/backups\/[0-9T-]+-update \(3 md files/); assert.match(out, /Created: \.sil\/updates\/0\.3\.0\.md/); assert.match(out, /Created: \.sil\/updates\/0\.4\.0\.md/); assert.match(out, /Created: \.sil\/updates\/0\.5\.0\.md/); assert.match(out, /Appended: CLAUDE\.md \(update notes prompt\)/); assert.match(out, /Recorded: \.sil\/config\.yaml version \d+\.\d+\.\d+ \(was 0\.2\.0, inferred from what sil init wrote\)\n/)
   assert.ok(!out.includes('0.2.0.md'), 'a 0.2.0 project (SILMARI.md has the Running section) does not get the 0.2.0 note')
   const sk = readFileSync(resolve(d, 'SILMARI.md'), 'utf8')
-  assert.match(sk, /^# SILMARI\n\nIntro kept\.\n\n## Notation\n\nSix symbols/, 'head kept, generated section replaced')
+  assert.match(sk, /^# SILMARI\n\nIntro kept\.\n\n## Notation\n\nEight symbols/, 'head kept, generated section replaced')
   assert.match(sk, /## Running a call\n\n1\. If the calling heading/); assert.match(sk, /## Subagents\n\nA step whose heading/)
   assert.match(sk, /## Flow\n\n- \[Feature work\]\(flow\.md\)\n\n## My rules\n\nBe brief\.\n\n- \[Late link\]\(flow\.md\)\n$/, 'user sections in their order; the line added after the old Migration section survives')
   assert.ok(!sk.includes('## Migration') && !sk.includes('## Agents'), 'Migration gone, and a heading inside its fenced example is not mistaken for a section')
@@ -192,7 +195,9 @@ test('update: refreshes the generated sections of SILMARI.md, moves Migration to
   assert.match(cl, /apply the update notes in \.sil\/updates\/: first tell the user[^\n]*then ask: "Start the silmari update\?"[^\n]*delete those files and this line/)
   assert.match(readFileSync(resolve(d, '.sil/updates/0.3.0.md'), 'utf8'), /^# silmari 0\.3\.0[\s\S]*## 1\. Tell the user first[\s\S]*Before: only md documents[\s\S]*## 2\. If yes/)
   assert.match(readFileSync(resolve(d, '.sil/config.yaml'), 'utf8'), /^entry: \[SILMARI\.md\]\nlang: ko\nversion: \d+\.\d+\.\d+/, 'the version line is added, the rest untouched')
-  assert.match(run('lint', d).stdout, /L-I07 +1 update note not applied yet: 0\.3\.0\.md/)
+  assert.match(run('lint', d).stdout, /L-I07 +3 update notes not applied yet: 0\.3\.0\.md, 0\.4\.0\.md, 0\.5\.0\.md/)
+  assert.match(readFileSync(resolve(d, '.sil/updates/0.4.0.md'), 'utf8'), /project start files[\s\S]*\{\{-…\}\}/, 'the 0.4.0 note explains the flipped default and the new marker')
+  assert.match(readFileSync(resolve(d, '.sil/updates/0.5.0.md'), 'utf8'), /Files as outputs and inputs[\s\S]*\{\{>report\}\}[\s\S]*\{\{<report\}\}[\s\S]*\{\{=Build the report\}\}/, 'the 0.5.0 note carries the file write/import values and {{=…}} sections that 0.4.0 shipped unannounced')
   const again = run('update', d).stdout
   assert.match(again, /Unchanged: SILMARI\.md\nUp to date: \d+\.\d+\.\d+\n$/)
   assert.equal(readFileSync(resolve(d, 'CLAUDE.md'), 'utf8'), cl, 'no second prompt line')
@@ -201,6 +206,10 @@ test('update: refreshes the generated sections of SILMARI.md, moves Migration to
   const mig = run('migrate', d).stdout
   assert.match(mig, /Created: \.sil\/migration\.md\nAppended: AGENTS\.md \(migration prompt\)\n$/, 'CLAUDE.md already has the line')
   assert.match(run('update', resolve(tmpdir())).stderr, /no \.sil\/ found above/)
+  // backup on its own: the same files, under a manual folder; the backups folder itself is never scanned
+  const bk = run('backup', d).stdout; const bdir = /Backup: (\S+) \((\d+) md files\)/.exec(bk)!
+  assert.equal(bdir[2], '4', 'SILMARI.md · flow.md · CLAUDE.md · AGENTS.md'); assert.ok(existsSync(resolve(d, bdir[1], 'SILMARI.md')) && existsSync(resolve(d, bdir[1], 'flow.md')) && existsSync(resolve(d, bdir[1], 'AGENTS.md')))
+  assert.match(run('backup', d).stdout, /\(4 md files\)/, 'earlier backups are not counted as documents')
   // A 0.1.x project: a words block in the config, no Running section. It gets every note since, in order
   const e = resolve(tmpdir(), `sil-update-old-${process.pid}`); rmSync(e, { recursive: true, force: true }); mkdirSync(resolve(e, '.sil'), { recursive: true })
   writeFileSync(resolve(e, '.sil/config.yaml'), 'entry: [SILMARI.md]\nlang: ko\nwords:\n  inputs: [입력]\n')
@@ -221,15 +230,15 @@ test('update: refreshes the generated sections of SILMARI.md, moves Migration to
 
 test('run: checks the call line before anything starts — (( )) label, --send names, tools/model flags, rejected flags, (path) values; --dry-run shows the command', () => {
   const d = resolve(tmpdir(), `sil-run-${process.pid}`); rmSync(d, { recursive: true, force: true }); mkdirSync(resolve(d, 'agents'), { recursive: true })
-  writeFileSync(resolve(d, 'flow.md'), '# 흐름\n\n## 1. 점검 ((서브에이전트로, sil run))\n[점검기](agents/checker.md) 를 {{>marker}} 와 {{>prefs}} 와 함께 부르고 {{<report}} 를 받는다. {{#하이쿠}} 에서 {{+읽기 도구}} 만을 사용한다.\n\n## 2. 마무리\n[점검기](agents/checker.md) 를 {{>marker}} 와 함께 부르고 {{<report2}} 를 받는다.\n')
+  writeFileSync(resolve(d, 'flow.md'), '# 흐름\n\n## 1. 점검 ((서브에이전트로, sil run))\n[점검기](agents/checker.md) 를 {{>marker}} 와 {{>prefs}} 와 함께 부르고 {{<report}} 를 받는다. {{#하이쿠}} 에서 {{+읽기 도구}} 만을 사용한다.\n\n## 2. 마무리\n[점검기](agents/checker.md) 를 {{>marker}} 와 함께 부르고 {{<report2}} 를 받는다.\n\n## 3. 격리 점검 ((서브에이전트로, sil run))\n[점검기](agents/checker.md) 를 {{>marker}} 와 {{>prefs}} 와 함께 부르고 {{<report}} 를 받는다. {{#하이쿠}} 에서 {{+읽기 도구}} 만을, {{-프로젝트 규칙 없이}} 사용한다.\n')
   writeFileSync(resolve(d, 'agents/checker.md'), '# 점검기\n\n## {{>입력}}\n- marker (path) — 읽을 파일\n- prefs (json) — 설정\n\n## {{<출력}}\n- report\n')
   writeFileSync(resolve(d, 'marker.txt'), 'MARKER-42\n')
   const r = (...a: string[]) => spawnSync(process.execPath, ['--experimental-strip-types', MAIN, 'run', ...a], { encoding: 'utf8', cwd: d })
   const ok = ['claude', '--step', 'flow.md#1', '--send', 'marker=marker.txt', '--send', 'prefs={"a":1}', '--model', 'haiku', '--tools', 'Read']
   const dry = r(...ok, '--dry-run')
-  assert.equal(dry.status, 0); assert.equal(dry.stdout.trim(), 'claude -p "<prompt>" --output-format stream-json --verbose --setting-sources user --model haiku --tools Read', 'sil adds its own arguments and passes the rest through unchanged')
+  assert.equal(dry.status, 0); assert.equal(dry.stdout.trim(), 'claude -p "<prompt>" --output-format stream-json --verbose --model haiku --tools Read', 'no {{-…}} on the call line: the project start files reach the subagent, as people expect')
   const p = r(...ok, '--prompt-only').stdout
-  assert.match(p, /^This session runs one isolated step of a flow/); assert.match(p, /## Values for this run\n- marker:\nmarker\.txt\n- prefs:\n\{"a":1\}/); assert.match(p, /keys are: report/)
+  assert.match(p, /^This session runs one step of a flow as a subagent[\s\S]*the project rules you were started with still apply/, 'the prompt says the start files still apply'); assert.match(p, /## Values for this run\n- marker:\nmarker\.txt\n- prefs:\n\{"a":1\}/); assert.match(p, /keys are: report/)
   const refused = (args: string[], re: RegExp) => { const x = r(...args); assert.equal(x.status, 1, args.join(' ')); assert.match(x.stderr, re) }
   refused(['claude', '--step', 'flow.md#2', '--send', 'marker=marker.txt'], /not a subagent step: its heading has no \(\( \)\) label/)
   refused(['claude', '--step', 'flow.md#1', '--send', 'markr=marker.txt', '--send', 'prefs={}', '--model', 'haiku', '--tools', 'Read'], /expects --send for: marker prefs\. Got: markr prefs/)
@@ -244,7 +253,15 @@ test('run: checks the call line before anything starts — (( )) label, --send n
   refused(['claude', '--step', 'flow.md#9', '--send', 'x=1'], /no heading numbered 9/)
   const help = r('--help'); assert.equal(help.status, 0); assert.match(help.stdout, /sil run claude --step flow\.md#1/); assert.match(help.stdout, /enforcement: os-sandbox/)
   const codex = r('codex', ...ok.slice(1, 7), '-m', 'gpt-5.4-mini', '-s', 'read-only', '--dry-run')
-  assert.equal(codex.stdout.trim(), 'codex exec --json --skip-git-repo-check -c project_doc_max_bytes=0 "<prompt>" -m gpt-5.4-mini -s read-only')
+  assert.equal(codex.stdout.trim(), 'codex exec --json --skip-git-repo-check "<prompt>" -m gpt-5.4-mini -s read-only')
+  // {{-…}} on the call line: sil adds the runtime's own switch for its project start files, and says so in the prompt
+  const cut = ['--step', 'flow.md#3', '--send', 'marker=marker.txt', '--send', 'prefs={"a":1}']
+  assert.equal(r('claude', ...cut, '--model', 'haiku', '--tools', 'Read', '--dry-run').stdout.trim(),
+    'claude -p "<prompt>" --output-format stream-json --verbose --setting-sources user --model haiku --tools Read')
+  assert.equal(r('codex', ...cut, '-m', 'gpt-5.4-mini', '-s', 'read-only', '--dry-run').stdout.trim(),
+    'codex exec --json --skip-git-repo-check -c project_doc_max_bytes=0 "<prompt>" -m gpt-5.4-mini -s read-only')
+  assert.match(r('claude', ...cut, '--model', 'haiku', '--tools', 'Read', '--prompt-only').stdout,
+    /^This session runs one isolated step of a flow\. The project start files are switched off for it/, 'the prompt tells the subagent it is on its own')
   rmSync(d, { recursive: true, force: true })
 })
 

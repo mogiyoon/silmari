@@ -10,3 +10,5 @@ notes/
 DECISIONS.md
 # per-user viewer state
 **/.sil/layout.json
+# experiments (harness, corpora, raw runs) — kept out of the repo for now
+experiment/

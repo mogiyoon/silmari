@@ -156,6 +156,70 @@ test('Contract headings are symbols at any level and in any language; the words 
   assert.deepEqual(g.nodes[0].contract, { inputs: ['posting', 'prefs'], outputs: ['analysis'], types: { prefs: 'json' } })
 })
 
+test('{{=…}} calls its first link; the executable writes a planned file that another md imports', () => {
+  const gather = parseDoc('gather.md', `# Gather
+
+## {{>Inputs}}
+- planfile (path)
+- specfile (path)
+
+## {{=Document CLI}}
+
+[Document CLI](app/cli.py) receives {{>planfile}} and {{>specfile}}.
+
+[Gathered document](flows/out/doc1.json) stores {{>docfile}}.
+
+\`\`\`bash
+python -m app.cli gather > flows/out/doc1.json
+\`\`\`
+`)
+  const render = parseDoc('render.md', '# Render\n\n[Gathered document](flows/out/doc1.json) provides {{<document}}.\n')
+  assert.equal(gather.headings.find((h) => h.text === 'Document CLI')?.execution, true)
+  assert.deepEqual(gather.links.map((l) => [l.execution?.target, l.target]), [[true, 'app/cli.py'], [false, 'flows/out/doc1.json']])
+  const g = buildGraph(new Map([['gather.md', gather], ['render.md', render]]), { exists: (rel) => rel === 'app/cli.py' })
+  assert.deepEqual(g.edges.map((e) => [e.type, e.from, e.to, e.declaredIn]), [
+    ['write', 'app/cli.py', 'flows/out/doc1.json', 'gather.md'],
+    ['read', 'flows/out/doc1.json', 'render.md', 'render.md'],
+    ['call', 'gather.md', 'app/cli.py', undefined],
+  ])
+  assert.deepEqual(g.nodes.find((n) => n.id === 'flows/out/doc1.json')?.file, { exists: false, planned: true })
+  assert.ok(!g.diagnostics.some((x) => x.code === 'L-N01' && x.where.startsWith('gather.md')))
+})
+
+test('{{=…}} calls a target even without values; later unmarked links remain references', () => {
+  const d = parseDoc('vision.md', '# Vision\n\n## {{=Prepare vision}}\n\n[Vision tool](vision.py) runs.\n\n[Guide](guide.md) explains it.\n')
+  const g = buildGraph(new Map([['vision.md', d], ['guide.md', parseDoc('guide.md', '# Guide\n')]]), { exists: (rel) => rel === 'vision.py' })
+  assert.deepEqual(g.edges.map((e) => [e.type, e.to]), [['call', 'vision.py'], ['ref', 'guide.md']])
+})
+
+test('A dynamic output path is one planned pattern node shared with its importer', () => {
+  const gather = parseDoc('gather.md', '# Gather\n\n## {{>Inputs}}\n- document-id\n\n## {{=CLI}}\n\n[CLI](app/cli.py) runs.\n\n[Output](flows/out/{{>document-id}}.json) stores {{>docfile}}.\n')
+  const render = parseDoc('render.md', '# Render\n\n## {{>Inputs}}\n- document-id\n\n[Output](flows/out/{{>document-id}}.json) provides {{<document}}.\n')
+  const g = buildGraph(new Map([['gather.md', gather], ['render.md', render]]), { exists: (rel) => rel === 'app/cli.py', glob: () => [] })
+  const pattern = 'flows/out/{{>document-id}}.json'
+  assert.deepEqual(g.nodes.find((n) => n.id === pattern)?.file, { exists: false, planned: true, template: true, matches: 0 })
+  assert.deepEqual(g.edges.filter((e) => e.to === pattern || e.from === pattern).map((e) => [e.type, e.from, e.to]), [
+    ['write', 'app/cli.py', pattern], ['read', pattern, 'render.md'],
+  ])
+  assert.ok(!g.diagnostics.some((d) => d.code === 'L-N28'))
+})
+
+test('A generated Markdown output stays a file node after it appears and its contents are not parsed as instructions', () => {
+  const gather = parseDoc('gather.md', '# Gather\n\n## {{=CLI}}\n\n[CLI](cli.py) runs.\n\n[Report](out/report.md) stores {{>report}}.\n')
+  const report = parseDoc('out/report.md', '# Generated report\n\n[Text inside the report](missing.md) is output, not a silmari edge.\n')
+  const g = buildGraph(new Map([['gather.md', gather], ['out/report.md', report]]), { exists: () => true })
+  const n = g.nodes.find((n) => n.id === 'out/report.md')
+  assert.equal(n?.kind, 'file')
+  assert.deepEqual(n?.file, { exists: true, planned: true })
+  assert.ok(!g.nodes.some((n) => n.id === 'out/missing.md'))
+  assert.ok(!g.edges.some((e) => e.from === 'out/report.md'))
+})
+
+test('An empty {{=…}} execution section warns', () => {
+  const g = buildGraph(new Map([['empty.md', parseDoc('empty.md', '# Empty\n\n## {{=실행}}\n')]]))
+  assert.ok(g.diagnostics.some((d) => d.code === 'L-N31'))
+})
+
 test('L-N18 / L-N19 / L-N20 / L-N21: empty markers, a contract heading as H1, trailing text, unbalanced (( ))', () => {
   const ds = diagsOf({ 'a.md': '# A\n\n## {{>}}\n- x\n\n## {{>Inputs}} (optional)\n- y\n\n## 1. Go (())\n\n## 2. Go ((use a subagent)\n\n[b](b.md) 에 {{>x}} {{+}} 를 넘긴다.\n', 'b.md': '# B\n\n## {{>Inputs}}\n- x\n' })
   assert.equal(ds.filter((d) => d.code === 'L-N18').length, 3, 'empty {{>}} heading, empty (()), empty {{+}}')
@@ -284,4 +348,32 @@ test('Isolation label: ((…)) at the heading end in any language; the old [ ] f
   assert.ok(old.diags.some((d) => d.code === 'L-I05' && d.message.includes('((서브 에이전트 사용))')), 'and suggest the new form')
   assert.ok(!parseDoc('a.md', '# A\n\n## 1. Research ((use a subagent))\n\n[b](b.md)\n').diags.some((d) => d.code === 'L-I05'))
   assert.ok(!parseDoc('a.md', '# A\n\n## [서브 에이전트] 목록\n\n[b](b.md)\n').headings.find((x) => x.level === 2)!.subagent, '[subagent] inside a title is not a label')
+})
+
+test('{{-…}}: the start-file switch is free text on the call line, reaches the edge, and is a subagent-only marker (L-N26, L-N18)', () => {
+  const callee = '# B\n\n## {{>Inputs}}\n- x\n\n## {{<Outputs}}\n- y\n'
+  const g = buildGraph(new Map([
+    ['a.md', parseDoc('a.md', '# A\n\n## 1. 격리 ((서브에이전트))\n\n[b](b.md) 에 {{>x}} 를 주고 {{<y}} 를 받는다. {{+읽기}} 로, {{#빠른 모델}} 에서, {{-프로젝트 규칙 없이}} 실행한다.\n')],
+    ['b.md', parseDoc('b.md', callee)],
+  ]))
+  const e = g.edges.find((x) => x.to === 'b.md')!
+  assert.equal(e.noRules, '프로젝트 규칙 없이', 'the words inside are kept as written, spaces and all')
+  assert.equal(e.isolated, true)
+  assert.ok(!g.diagnostics.some((d) => d.code === 'L-N26'), 'on a subagent call it is exactly where it belongs')
+  assert.ok(!g.diagnostics.some((d) => d.code === 'L-N04'), 'free text, so the value-name syntax does not apply')
+
+  // Outside a subagent step it does nothing, like {{+…}} and {{#…}}
+  const plain = diagsOf({ 'a.md': '# A\n\n[b](b.md) 에 {{>x}} 를 주고 {{<y}} 를 받는다. {{-규칙 없이}}\n', 'b.md': callee })
+  assert.ok(plain.some((d) => d.code === 'L-N26' && d.severity === 'warning'))
+
+  // An empty marker is reported like every other empty marker
+  const empty = diagsOf({ 'a.md': '# A\n\n## 1. 격리 ((서브에이전트))\n\n[b](b.md) 에 {{>x}} 를 주고 {{<y}} 를 받는다. {{-}}\n', 'b.md': callee })
+  assert.ok(empty.some((d) => d.code === 'L-N18' && d.severity === 'warning'))
+
+  // A document without the marker carries nothing: the default is that the start files come along
+  const none = buildGraph(new Map([
+    ['a.md', parseDoc('a.md', '# A\n\n## 1. 보통 ((서브에이전트))\n\n[b](b.md) 에 {{>x}} 를 주고 {{<y}} 를 받는다.\n')],
+    ['b.md', parseDoc('b.md', callee)],
+  ]))
+  assert.equal(none.edges.find((x) => x.to === 'b.md')!.noRules, undefined)
 })

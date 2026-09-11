@@ -2,7 +2,7 @@
   "name": "silmari-vscode",
   "displayName": "silmari",
   "description": "Checks the flow and data between md documents and shows them as a graph — missing files, missing anchors, data without a link, references nobody calls",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "publisher": "mogiyoon",
   "icon": "images/icon.png",
   "license": "MIT",
@@ -35,21 +35,45 @@
     "commands": [
       {
         "command": "silmari.view",
-        "title": "silmari: Show graph",
-        "category": "silmari"
+        "title": "Show graph",
+        "shortTitle": "Graph",
+        "category": "silmari",
+        "icon": "$(type-hierarchy)"
       },
       {
         "command": "silmari.lint",
-        "title": "silmari: Check now",
-        "category": "silmari"
+        "title": "Check now",
+        "shortTitle": "Lint",
+        "category": "silmari",
+        "icon": "$(check-all)"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "silmari.editorTitle",
+        "label": "silmari",
+        "icon": {
+          "light": "images/toolbar.png",
+          "dark": "images/toolbar.png"
+        }
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "silmari.view",
+          "submenu": "silmari.editorTitle",
           "when": "editorLangId == markdown",
-          "group": "navigation"
+          "group": "navigation@1"
+        }
+      ],
+      "silmari.editorTitle": [
+        {
+          "command": "silmari.view",
+          "group": "navigation@1"
+        },
+        {
+          "command": "silmari.lint",
+          "group": "navigation@2"
         }
       ]
     },

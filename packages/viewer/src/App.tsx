@@ -1,6 +1,6 @@
 // Interface 2. Plan §7.6. One graph + kind filter + node cards + edge labels. Drag links to edit them (S8).
 // Expanding a node shows its document headings as boxes inside it. Call edges leave from those heading boxes.
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type SyntheticEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type SyntheticEvent, type PointerEvent as ReactPointerEvent } from 'react'
 
 /** Edit permission (server mode) and notifications. Use context to avoid passing props deep into the right panel */
 type Draft = { doc: string; hash: string; h: { line: number; body: string; range: { start: number; end: number } }; text: string }
@@ -12,19 +12,21 @@ import {
   getBezierPath, MarkerType, useNodesState, useReactFlow, useStoreApi, useNodesInitialized, useStore, type Node, type Edge, type NodeProps, type EdgeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { slug } from '@silmari/core'
 import type { Graph, Node as SilNode, Edge as SilEdge, NodeKind, Diagnostic } from '@silmari/core'
 import { useGraph, type Phase } from './data.ts'
 import { useLayout } from './useLayout.ts'
 import { DICTS, LangCtx, initialLang, saveLang, useLang, type Lang } from './i18n.ts'
 import { GLCanvas, glHit, type GLEdge, type GLNode } from './gl.tsx'
 import { type Cell, type LabelOrder, cells, skeleton, entryView, nodeSize, secPos, secHeight, SEC_W, SIZE, edgeLabelRows } from './layout.ts'
+import { routePath, labelRoute, plainRoute, sameColRoute, returnRoute as returnPath, readRoute as readPath, dropRoute, CORNER_R, RT_Y, STRIP } from './route.ts'
 import { loadLocal, saveLocal, loadFile, setFileSink, scheduleFileSave, flushFileSave, serverSink, webviewSink, readFileText, edgeKey, type Saved } from './store.ts'
 
 const KIND: Record<NodeKind, { color: string }> = {
   task: { color: '#2563eb' }, doc: { color: '#059669' }, file: { color: '#64748b' }, ghost: { color: '#dc2626' },
 }
-// There are three line types. Solid = call with data. Dashed = link only (mention or reference). Red dashed = missing file
-const ETYPE: Record<SilEdge['type'], string> = { call: '#cbd5e1', mention: '#94a3b8', ref: '#94a3b8' }
+// Calls and data flow are solid. Ordinary references are dashed.
+const ETYPE: Record<SilEdge['type'], string> = { call: '#cbd5e1', mention: '#94a3b8', ref: '#94a3b8', read: '#2dd4bf', write: '#2dd4bf' }
 
 type Hd = SilNode['headings'][number]
 /** The right panel's two editing stages: 1 = prompt bodies as textareas, 2 = the whole file as text */
@@ -33,7 +35,7 @@ type NData = { sil: SilNode; hot: boolean; dim: boolean; selected: boolean; isol
   /** Entry view: documents outside the open flow that also call this one */ outside?: string[]
   /** Entry overview: opens this registered flow alone */ drill?: () => void }
 type SData = { doc: string; h: Hd; sel: boolean; hot: boolean; dim: boolean; calls: number }
-type EData = { sil: SilEdge; k: number; hot: boolean; dim: boolean; ghost: boolean; label?: { x: number; y: number }; off: { dx: number; dy: number }; onDrag: (key: string, off: { dx: number; dy: number }) => void; idx: number; onMeasure: (idx: number, w: number, h: number) => void }
+type EData = { sil: SilEdge; k: number; hot: boolean; dim: boolean; ghost: boolean; label?: { x: number; y: number }; heads?: { from?: string; to?: string }; s1?: number; t1?: number; returnRoute?: { outX: number; inX: number; y: number; r: number }; readRoute?: { outX: number; y: number; drop?: boolean }; off: { dx: number; dy: number }; pinned: boolean; onDrag: (key: string, off: { dx: number; dy: number }) => void; onReset: (key: string) => void; idx: number; onMeasure: (idx: number, w: number, h: number) => void }
 type RN = Node<NData, 'sil'>
 type SN = Node<SData, 'sec'>
 type RE = Edge<EData, 'sil'>
@@ -59,13 +61,14 @@ function SilNodeView({ id, data }: NodeProps<RN>) {
   const s = nodeSize(n, data.open)
   // Text is never cut: the title and file name wrap, the node grows, and the real height goes back to the layout
   useEffect(() => { const el = ref.current; if (el && !data.open) data.onSize(n.id, el.offsetHeight) })
-  const leaf = n.kind === 'ghost' || n.kind === 'file' // nothing inside to expand: no headings, no prompt
+  const leaf = n.kind === 'ghost' || n.kind === 'file'
   const bar = !leaf || data.kids > 0 || !!data.drill
   return (
-    <div ref={ref} className={`nd ${n.kind}${data.selected ? ' sel' : ''}${data.hot ? ' hot' : ''}${data.isolated ? ' iso' : ''}${data.open ? ' open' : ''}`}
-         style={{ width: s.w, ...(data.open ? { height: s.h } : { minHeight: s.h }), background: data.open ? undefined : KIND[n.kind].color, borderColor: data.open ? KIND[n.kind].color : undefined, opacity: data.dim ? 0.15 : 1 }}>
+    <div ref={ref} className={`nd ${n.kind}${n.file?.planned && !n.file.exists ? ' planned' : ''}${data.selected ? ' sel' : ''}${data.hot ? ' hot' : ''}${data.isolated ? ' iso' : ''}${data.open ? ' open' : ''}`}
+         style={{ width: s.w, ...(data.open ? { height: s.h } : { minHeight: s.h }), background: data.open ? undefined : KIND[n.kind].color, borderColor: data.open && !data.hot && !data.selected ? KIND[n.kind].color : undefined, opacity: data.dim ? 0.15 : 1 }}>
       <Handle type="target" position={Position.Left} />
-      <Handle type="target" position={Position.Right} id="rt" />
+      <Handle type="target" position={Position.Top} id="tt" /> {/* imported file data comes in from above */}
+      <Handle type="target" position={Position.Right} id="rt" style={{ top: `${RT_Y * 100}%` }} /> {/* same-column links enter below the middle, so the arrowhead does not cover the source handle */}
       {/* Buttons sit in their own row above the text so the title keeps the full width. Children are to the right: ▸ opens one level,
           ▸▸ everything below, ◂ closes. ▾ opens the headings */}
       {bar && (
@@ -85,9 +88,10 @@ function SilNodeView({ id, data }: NodeProps<RN>) {
       )}
       <div className="hd" title={`${n.title}\n${n.id}`}>
         <div className="t">{n.title}</div>
-        {lod === 'full' && <div className="id">{n.kind === 'ghost' ? t.missingFile : n.id}{data.entry && <span className="entrychip" title={t.entryTitle}>{t.entry}</span>}{data.outside && data.outside.length > 0 && <span className="outchip" title={t.outsideTitle(data.outside)}>{t.outsideCallers(data.outside.length)}</span>}</div>}
+        {lod === 'full' && <div className="id">{n.kind === 'ghost' ? t.missingFile : n.id}{n.file?.planned && !n.file.exists && <span className="badge planned">{n.file.template ? t.templateFile : t.plannedFile}</span>}{data.entry && <span className="entrychip" title={t.entryTitle}>{t.entry}</span>}{data.outside && data.outside.length > 0 && <span className="outchip" title={t.outsideTitle(data.outside)}>{t.outsideCallers(data.outside.length)}</span>}</div>}
       </div>
       <Handle type="source" position={Position.Right} />
+      <Handle type="source" position={Position.Bottom} id="b" /> {/* a file standing above its reader drops its line from here */}
     </div>
   )
 }
@@ -103,6 +107,7 @@ function SecNodeView({ id, data }: NodeProps<SN>) {
       <div className="t">
         <span className="muted">{'#'.repeat(h.level)} </span>{h.text}
         <span className="muted ln"> :{h.line}</span>
+        {h.execution && <span className="badge run">=</span>}
         {h.subagent && <span className="badge iso">{t.subagent}</span>}
         {calls > 0 && <span className="calls">{t.calls(calls)}</span>}
       </div>
@@ -111,11 +116,11 @@ function SecNodeView({ id, data }: NodeProps<SN>) {
   )
 }
 
-function SilEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd }: EdgeProps<RE>) {
-  const { sil: e, k, hot, dim, ghost, label, off, onDrag, idx, onMeasure } = data!
+function SilEdgeView({ id, sourceX, sourceY, targetX, targetY, targetPosition, data, markerEnd }: EdgeProps<RE>) {
+  const { sil: e, hot, dim, ghost, label, heads, s1, t1, returnRoute, readRoute, off, pinned, onDrag, onReset, idx, onMeasure } = data!
   const { t } = useLang()
   const lod = useContext(LodCtx)
-  const rows = edgeLabelRows(e, { send: t.tagSend, ret: t.tagReceive, tools: t.tagTools, model: t.tagModel })
+  const rows = edgeLabelRows(e, { send: t.tagSend, ret: t.tagReceive, tools: t.tagTools, model: t.tagModel, write: t.tagWrite, read: t.tagRead })
   const { getZoom } = useReactFlow()
   // Report the rendered label's actual size. Layout uses it instead of an estimate, including the 3px glow
   const elRef = useRef<HTMLDivElement>(null)
@@ -123,36 +128,53 @@ function SilEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, t
   // Dragging a label box bends the curve through it. Inner keeps the offset and saves it in localStorage
   const [drag, setDrag] = useState(off)
   useEffect(() => setDrag(off), [off])
+  const key = edgeKey(e)
   const onPointerDown = (ev: ReactPointerEvent<HTMLDivElement>) => {
     ev.stopPropagation()
     const z = getZoom(), sx = ev.clientX, sy = ev.clientY, start = drag
     let last = start
     const move = (m: PointerEvent) => { last = { dx: start.dx + (m.clientX - sx) / z, dy: start.dy + (m.clientY - sy) / z }; setDrag(last) }
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); onDrag(edgeKey(e), last) }
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); onDrag(key, last) }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
   }
-  // The line passes through the label position plus its drag offset. It bends at right angles. Vertical parts stay in a narrow strip beside the label column.
-  // It crosses only its own label, not text in other labels
-  let lx: number, ly: number
-  if (label) { lx = label.x + drag.dx; ly = label.y + drag.dy }
-  else { ;[, lx, ly] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.25 + k * 0.25 }); ly += k * 30; lx += drag.dx; ly += drag.dy }
-  const m1 = (sourceX + lx) / 2, m2 = (lx + targetX) / 2
-  const path = `M${sourceX},${sourceY} C${m1},${sourceY} ${m1},${ly} ${lx},${ly} C${m2},${ly} ${m2},${targetY} ${targetX},${targetY}`
+  // The line passes through the label position plus its drag offset. Vertical runs stay in the strip between a node column and
+  // the label lane, so a line never runs under a label. Without a label (a plain reference) there is nothing to pass through
+  const lx = label ? label.x + drag.dx : targetX, ly = label ? label.y + drag.dy : targetY
+  // An import comes in from above along the row the layout kept; returned output follows its corridor; a same-column link leaves
+  // and re-enters on the right; every other edge bends through its label, or once when it has none. All are right angles with the
+  // same rounded corners (route.ts)
+  const path = routePath(readRoute?.drop
+    ? dropRoute(sourceX, sourceY, targetX, targetY, lx, ly)
+    : readRoute
+    ? readPath(sourceX, sourceY, targetX, targetY, readRoute, lx, ly)
+    : returnRoute
+    ? returnPath(sourceX, sourceY, targetX, targetY, { ...returnRoute, y: returnRoute.y + drag.dy })
+    : targetPosition === Position.Right ? sameColRoute(sourceX, sourceY, targetX, targetY, label ? lx : sourceX + STRIP, s1, t1)
+    : !label ? plainRoute(sourceX, sourceY, targetX, targetY, s1)
+    : labelRoute(sourceX, sourceY, targetX, targetY, lx, ly, s1), returnRoute?.r ?? CORNER_R)
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd}
-                style={{ stroke: ghost ? '#f87171' : hot ? '#fff' : ETYPE[e.type], strokeWidth: hot ? 2.6 : 1.6, strokeDasharray: ghost || e.type !== 'call' ? '6 4' : undefined, opacity: dim ? 0.1 : hot ? 1 : 0.85 }} />
+                style={{ stroke: ghost ? '#f87171' : hot ? '#fff' : ETYPE[e.type], strokeWidth: hot ? 2.6 : 1.6, strokeDasharray: ghost || e.type === 'mention' || e.type === 'ref' ? '6 4' : undefined, opacity: dim ? 0.1 : hot ? 1 : 0.85 }} />
       {!dim && lod === 'full' && (rows.length > 0 || e.isolated) && (
         <EdgeLabelRenderer>
           {/* Subagent calls use a different label box. It has a purple border and top strip. Isolation belongs to the call, so it stays on the edge (§1.5) */}
-          <div ref={elRef} className={`el nopan nodrag${e.isolated ? ' iso' : ''}`} onPointerDown={onPointerDown} title={t.dragToMove}
+          <div ref={elRef} className={`el ${e.type} nopan nodrag${e.isolated ? ' iso' : ''}`} onPointerDown={onPointerDown} title={t.dragToMove}
                style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`, pointerEvents: 'all', cursor: 'grab' }}>
             {/* Top: show the target md. The label identifies it without tracing the line */}
-            <div className="lt" title={t.target(e.to)}>→ {e.to}</div>
-            {/* Head: containing heading (condition) + subagent badge, then the call's tools and model as solid chips (no tag, no arrow) / body: send · receive / foot: anchor */}
-            {(rows.some((r) => r.kind === 'under') || e.isolated) && (
+            {e.noRules && <div className="edgeflag norules" title={t.noRulesOf(e.noRules)}>{t.noRules}</div>}
+            <div className="lt" title={t.target(e.to)}>
+              <span><span className="lfrom">{e.from}</span> → <span className="lto">{e.to}</span></span>
+              {pinned && <button className="labelreset nodrag" title={t.resetLabel} aria-label={t.resetLabel} onPointerDown={(ev) => ev.stopPropagation()} onClick={(ev) => { ev.stopPropagation(); onReset(key) }}>↺</button>}
+            </div>
+            {/* Head: the heading level of the same relation — the heading the call sits under → the heading the link points to (its
+                anchor), like the document line above it — plus the subagent badge; then the call's tools and model as solid chips / body: send · receive */}
+            {(heads?.from || heads?.to || e.isolated) && (
               <div className="lh">
-                <span className="lhx" title={t.headingOfCall}>{rows.find((r) => r.kind === 'under')?.text ?? ''}</span>
+                <span className="lhx">
+                  {heads?.from && <span title={t.headingOfCall}>{heads.from}</span>}
+                  {heads?.to && <><span className="arrow">→</span><span className="lhy" title={t.headingOfTarget}>{heads.to}</span></>}
+                </span>
                 {e.isolated && <span className="badge iso">{t.subagent}</span>}
               </div>
             )}
@@ -162,8 +184,7 @@ function SilEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, t
                 {e.tools?.length ? <div className="lrow"><span className="ltag">{t.tagTools}</span><span className="chips">{e.tools.map((v) => <span key={v} className="chip run tools">{v}</span>)}</span></div> : null}
               </div>
             )}
-            {/* Second section: anchor (references only) */}
-            {rows.filter((r) => r.kind === 'anchor').map((r) => <div key="anchor" className="la anchor">{r.text}</div>)}
+            {rows.filter((r) => r.kind === 'relation').map((r) => <div key="relation" className={`la ${e.type}`}>{r.text}</div>)}
             {/* Third section: send → receive */}
             {rows.some((r) => r.kind === 'send' || r.kind === 'ret') && (
               <div className="lb">
@@ -251,11 +272,12 @@ function Inner() {
   const [sel, setSel] = useState<string | null>(null)
   const [selHead, setSelHead] = useState<{ doc: string; line: number } | null>(null)
   const [hov, setHov] = useState<string | null>(null)
+  const [hovHead, setHovHead] = useState<{ doc: string; line: number } | null>(null) // the heading box under the cursor, when it is one
   const wheelAt = useRef({ x: -1, y: -1 }) // where the last wheel event happened; a mouse move at exactly that spot is not the user's
   // Hover highlight ends as soon as the view moves. Otherwise a node the cursor brushed while zooming stays lit:
   // once it leaves the screen (or the DOM window), its mouseleave never comes
   const rfStoreForHov = useStoreApi()
-  useEffect(() => { let last = rfStoreForHov.getState().transform; return rfStoreForHov.subscribe((st) => { if (st.transform !== last) { last = st.transform; setHov(null) } }) }, [rfStoreForHov])
+  useEffect(() => { let last = rfStoreForHov.getState().transform; return rfStoreForHov.subscribe((st) => { if (st.transform !== last) { last = st.transform; setHov(null); setHovHead(null) } }) }, [rfStoreForHov])
   const [toast, setToast] = useState<{ kind: 'ok' | 'bad' | 'warn'; text: string } | null>(null)
   // Turn on edit mode with 'Edit' at the top of the right panel. 'Save' writes all changed bodies once per document
   const [editing, setEditing] = useState(false)
@@ -326,6 +348,7 @@ function Inner() {
   const setDet = (k: string, o: boolean) => update((s) => { const n = new Set(s.ui?.det ?? []); o ? n.add(k) : n.delete(k); return { ...s, ui: { ...s.ui, det: [...n] } } })
   const toggle = (id: string) => update((s) => ({ ...s, open: s.open.includes(id) ? s.open.filter((x) => x !== id) : [...s.open, id] }))
   const onLabelDrag = (key: string, o: { dx: number; dy: number }) => update((s) => ({ ...s, labels: { ...s.labels, [key]: o } }))
+  const onLabelReset = (key: string) => update((s) => { const labels = { ...s.labels }; delete labels[key]; return { ...s, labels } })
 
   const { fitView, setViewport } = useReactFlow()
   const rfStore = useStoreApi()
@@ -454,14 +477,29 @@ function Inner() {
   }, [useGL, rfStore])
   const byId = useMemo(() => new Map((graph?.nodes ?? []).map((n) => [n.id, n])), [graph])
   const isolatedTargets = useMemo(() => new Set((graph?.edges ?? []).filter((e) => e.isolated).map((e) => e.to)), [graph])
-  // Same look as the DOM node: fill by kind, no border except purple 3px for subagent targets and pink for missing files
+  // Same look as the DOM node: planned runtime files are hollow with a neutral border in both renderers.
   const glNodes: GLNode[] = useMemo(() => !useGL || !graph ? [] : graph.nodes.filter((n) => shown.has(n.id)).map((n) => {
     const p = saved.nodes[n.id] ?? placed.nodes.get(n.id) ?? { x: 0, y: 0 }, s = { w: nodeSize(n, false).w, h: nodeH.get(n.id) ?? nodeSize(n, false).h }, iso = isolatedTargets.has(n.id)
-    const fill = n.kind === 'ghost' ? '#7f1d1d' : KIND[n.kind].color
+    const planned = !!n.file?.planned && !n.file.exists
+    const fill = n.kind === 'ghost' ? '#7f1d1d' : planned ? '#0b111c' : KIND[n.kind].color
     const folded = hiddenBelow.has(n.id)
-    const border = iso ? '#a78bfa' : n.kind === 'ghost' ? '#fca5a5' : folded ? '#e2e8f0' : fill
-    return { id: n.id, x: p.x, y: p.y, w: s.w, h: s.h, color: fill, title: n.title, border, bw: iso ? 3 : n.kind === 'ghost' || folded ? 2 : 0, r: n.kind === 'task' ? 8 : 28 } // the DOM's border-radius: 8px, pills for docs
+    const border = iso ? '#a78bfa' : n.kind === 'ghost' ? '#fca5a5' : planned ? '#94a3b8' : folded ? '#e2e8f0' : fill
+    return { id: n.id, x: p.x, y: p.y, w: s.w, h: s.h, color: fill, title: n.title, border, bw: iso ? 3 : n.kind === 'ghost' || planned || folded ? 2 : 0, r: n.kind === 'task' ? 8 : 28 }
   }), [useGL, graph, shown, placed, saved.nodes, isolatedTargets, hiddenBelow, nodeH])
+  // Where a node's vertical runs stand: beside its column's reserved (expanded) width, so they clear an expanded neighbour
+  const strip = (id: string) => { const r = placed.right.get(id); return r === undefined ? undefined : r + STRIP }
+  // The edges declared under one heading of a document: calls, and imports by their declaring line
+  const edgesUnder = useCallback((doc: string, line: number): Set<number> | null => {
+    if (!graph) return null
+    const n = byId.get(doc); if (!n) return null
+    const s = new Set<number>()
+    graph.edges.forEach((e, i) => { if ((e.declaredIn ?? e.from) === doc && secOf(n, e.line)?.line === line) s.add(i) })
+    return s
+  }, [graph, byId])
+  // A selected heading box narrows the focus to that heading: its edges, the nodes they reach, and nothing else. Other calls from
+  // the same document fade, even ones to the same nodes. Hovering a heading box does the same for the hover highlight
+  const headEdges = useMemo(() => (selHead ? edgesUnder(selHead.doc, selHead.line) : null), [selHead, edgesUnder])
+  const hovEdges = useMemo(() => (hovHead ? edgesUnder(hovHead.doc, hovHead.line) : null), [hovHead, edgesUnder])
   // Same path as the DOM edge: through the label position (plus the user's drag offset), or the curve midpoint when there is no label
   const glEdges: GLEdge[] = useMemo(() => {
     if (!useGL || !graph) return []
@@ -469,19 +507,13 @@ function Inner() {
     graph.edges.forEach((e, i) => {
       if (!shown.has(e.from) || !shown.has(e.to)) return
       const key = `${e.from}>${e.to}`, k = seen.get(key) ?? 0; seen.set(key, k + 1)
-      const ghost = byId.get(e.to)?.kind === 'ghost', off = saved.labels[edgeKey(e)] ?? { dx: 0, dy: 0 }
+      const ghost = byId.get(e.to)?.kind === 'ghost' || byId.get(e.from)?.kind === 'ghost', off = saved.labels[edgeKey(e)] ?? { dx: 0, dy: 0 }
       const lab = placed.labels.get(i)
-      let lx: number, ly: number
-      if (lab) { lx = lab.x; ly = lab.y }
-      else {
-        const a = byId.get(e.from)!, b = byId.get(e.to)!, pa = saved.nodes[e.from] ?? placed.nodes.get(e.from) ?? { x: 0, y: 0 }, pb = saved.nodes[e.to] ?? placed.nodes.get(e.to) ?? { x: 0, y: 0 }
-        const sa = nodeSize(a, false), sb = nodeSize(b, false)
-        lx = (pa.x + sa.w + pb.x) / 2; ly = (pa.y + sa.h / 2 + pb.y + sb.h / 2) / 2 + k * 30
-      }
-      out.push({ from: e.from, to: e.to, color: ghost ? '#f87171' : ETYPE[e.type], dashed: ghost || e.type !== 'call', lx: lx + off.dx, ly: ly + off.dy, tRight: placed.sameCol.has(i) })
+      const route = placed.returnRoutes.get(i)
+      out.push({ from: e.from, to: e.to, color: ghost ? '#f87171' : ETYPE[e.type], dashed: ghost || e.type === 'mention' || e.type === 'ref', lx: lab && lab.x + off.dx, ly: lab && lab.y + off.dy, returnRoute: route && { ...route, y: route.y + off.dy }, readRoute: placed.readRoutes.get(i), tRight: !placed.readRoutes.has(i) && placed.sameCol.has(i), s1: strip(e.from), t1: strip(e.to), dim: headEdges ? !headEdges.has(i) : undefined })
     })
     return out
-  }, [useGL, graph, shown, byId, placed, saved.nodes, saved.labels])
+  }, [useGL, graph, shown, byId, placed, saved.nodes, saved.labels, headEdges])
   // Nodes React Flow gets in hybrid mode: those inside the window, the WIN_CAP nearest the center when there are more. null means every visible node (DOM only)
   const winIds = useMemo(() => {
     if (!useGL) return null
@@ -555,7 +587,7 @@ function Inner() {
       // Heading boxes inside an expanded node. Positions are relative to the parent. They cannot leave it or be dragged alone
       n.headings.forEach((h, i) => out.push({ id: secId(n.id, h.line), type: 'sec', parentId: n.id, extent: 'parent', draggable: false, selectable: false,
         position: secPos(n, i), width: SEC_W, height: secHeight(h),
-        data: { doc: n.id, h, sel: false, hot: false, dim: false, calls: graph.edges.filter((e) => e.from === n.id && secOf(n, e.line)?.line === h.line).length } }))
+        data: { doc: n.id, h, sel: false, hot: false, dim: false, calls: graph.edges.filter((e) => (e.declaredIn ?? e.from) === n.id && secOf(n, e.line)?.line === h.line).length } }))
     }
     // Keep earlier measurements. Otherwise React Flow drops handle positions. It does not remeasure same-sized nodes, so edges disappear
     setRfNodes((prev) => { const m = new Map(prev.map((x) => [x.id, x.measured])); return out.map((x) => (m.get(x.id) ? { ...x, measured: m.get(x.id) } : x)) })
@@ -579,25 +611,35 @@ function Inner() {
     if (pendingFit.current !== null && rfNodes.map((x) => x.id).join('|') === pendingFit.current) { pendingFit.current = null; setFitWanted(true) }
   }, [rfNodes, rfStore, fitView])
 
-  // Hover: the node under the cursor, its neighbors and its lines get brighter. Nothing dims, so a cursor left on a node after a zoom changes little
-  const hi = hov ? new Set([hov, ...(nb.get(hov) ?? [])]) : null
-  // Selection: the selected node and its neighbors stay, everything else fades. A click is deliberate, so this cannot be tripped by zooming; a click on empty space clears it
-  const focus = useMemo(() => (sel ? new Set([sel, ...(nb.get(sel) ?? [])]) : null), [sel, nb])
+  // Hover: the node under the cursor, its neighbors and its lines get brighter. Nothing dims, so a cursor left on a node after a zoom changes little.
+  // Over a heading box: that box, its document, and only what that heading's edges reach
+  const hi = hovHead && hovEdges && graph ? new Set([hovHead.doc, ...[...hovEdges].flatMap((i) => [graph.edges[i].from, graph.edges[i].to])]) : hov ? new Set([hov, ...(nb.get(hov) ?? [])]) : null
+  // Selection: the selected node and its neighbors stay, everything else fades. A click is deliberate, so this cannot be tripped by zooming; a click on empty space clears it.
+  // A selected heading box keeps only the document and what that heading's edges reach
+  const focus = useMemo(() => {
+    if (headEdges && graph && selHead) { const s = new Set([selHead.doc]); for (const i of headEdges) { const e = graph.edges[i]; s.add(e.from); s.add(e.to) } return s }
+    return sel ? new Set([sel, ...(nb.get(sel) ?? [])]) : null
+  }, [sel, nb, headEdges, graph, selHead])
   const nodes = rfNodes.map((x) => x.type === 'cell' ? x : x.type === 'sec'
-    ? { ...x, data: { ...(x as SN).data, hot: !!hi && hi.has((x as SN).data.doc), dim: !!focus && !focus.has((x as SN).data.doc), sel: selHead?.doc === (x as SN).data.doc && selHead.line === (x as SN).data.h.line } } as SN
+    ? { ...x, data: { ...(x as SN).data, hot: !!hi && hi.has((x as SN).data.doc) && !(hovHead && hovHead.doc === (x as SN).data.doc && hovHead.line !== (x as SN).data.h.line), dim: !!focus && !focus.has((x as SN).data.doc), sel: selHead?.doc === (x as SN).data.doc && selHead.line === (x as SN).data.h.line } } as SN
     : { ...x, data: { ...(x as RN).data, hot: !!hi && hi.has(x.id), dim: !!focus && !focus.has(x.id), selected: sel === x.id } } as RN)
   const seen = new Map<string, number>()
   const edges: RE[] = (flowMode === 'map' ? [] : graph?.edges ?? []).flatMap((e, i) => {
     if (!shown.has(e.from) || !shown.has(e.to) || (winIds && !(winIds.has(e.from) && winIds.has(e.to)))) return []
     const key = `${e.from}>${e.to}`; const k = seen.get(key) ?? 0; seen.set(key, k + 1)
-    const hot = hov !== null && (e.from === hov || e.to === hov) // the hovered node's own lines light up; nothing else changes
-    const dim = !!focus && !(focus.has(e.from) && focus.has(e.to))
+    const hot = hovEdges ? hovEdges.has(i) : hov !== null && (e.from === hov || e.to === hov) // the hovered node's (or heading's) own lines light up; nothing else changes
+    const dim = !!focus && (headEdges ? !headEdges.has(i) : !(focus.has(e.from) && focus.has(e.to)))
     // In an expanded node, leave from the heading box that contains the line
     const from = byId.get(e.from)
     const sec = open.has(e.from) && from ? secOf(from, e.line) : null
-    return [{ id: `e${i}`, source: sec ? secId(e.from, sec.line) : e.from, sourceHandle: sec ? 'r' : undefined, target: e.to, targetHandle: placed.sameCol.has(i) ? 'rt' : undefined, type: 'sil' as const,
-              markerEnd: { type: MarkerType.ArrowClosed, color: byId.get(e.to)?.kind === 'ghost' ? '#f87171' : ETYPE[e.type], width: 14, height: 14 },
-              data: { sil: e, k, hot, dim, ghost: byId.get(e.to)?.kind === 'ghost', label: placed.labels.get(i), off: saved.labels[edgeKey(e)] ?? { dx: 0, dy: 0 }, onDrag: onLabelDrag, idx: i, onMeasure } }]
+    // The heading line of the label: the heading the link sits under (in the declaring document) → the heading its anchor names in the
+    // target, resolved to that heading's title when it exists (a broken anchor stays as written, L-N09 reports it)
+    const decl = byId.get(e.declaredIn ?? e.from), fromSec = e.under.length > 1 && decl ? secOf(decl, e.line) : null
+    const toSec = e.anchor ? byId.get(e.to)?.headings.find((h) => slug(h.text) === e.anchor) : undefined
+    const heads = { from: fromSec ? `${'#'.repeat(fromSec.level)} ${fromSec.text}` : e.under.length > 1 ? e.under[e.under.length - 1] : undefined, to: e.anchor ? (toSec ? `${'#'.repeat(toSec.level)} ${toSec.text}` : `#${e.anchor}`) : undefined }
+    return [{ id: `e${i}`, source: sec ? secId(e.from, sec.line) : e.from, sourceHandle: sec ? 'r' : placed.readRoutes.get(i)?.drop ? 'b' : undefined, target: e.to, targetHandle: e.type === 'read' ? 'tt' : placed.sameCol.has(i) ? 'rt' : undefined, type: 'sil' as const,
+              markerEnd: { type: MarkerType.ArrowClosed, color: byId.get(e.to)?.kind === 'ghost' || byId.get(e.from)?.kind === 'ghost' ? '#f87171' : ETYPE[e.type], width: 14, height: 14 },
+              data: { sil: e, k, hot, dim, ghost: byId.get(e.to)?.kind === 'ghost' || byId.get(e.from)?.kind === 'ghost', label: placed.labels.get(i), heads, s1: strip(e.from), t1: strip(e.to), returnRoute: placed.returnRoutes.get(i), readRoute: placed.readRoutes.get(i), off: saved.labels[edgeKey(e)] ?? { dx: 0, dy: 0 }, pinned: edgeKey(e) in saved.labels, onDrag: onLabelDrag, onReset: onLabelReset, idx: i, onMeasure } }]
   })
 
   if (!graph) return <Loading phase={phase} error={error} />
@@ -623,7 +665,7 @@ function Inner() {
                    onNodeDrag={(_, x) => { if (x.type === 'sil') update((s) => ({ ...s, nodes: { ...s.nodes, [x.id]: { x: x.position.x, y: x.position.y } } })) }}
                    onNodeDragStop={(_, x) => { if (x.type === 'sil') update((s) => ({ ...s, nodes: { ...s.nodes, [x.id]: { x: x.position.x, y: x.position.y } } })) }}
                    // Highlight only on real pointer movement. After a wheel zoom the browser fires a mouse move at the same spot by itself
-                   onNodeMouseMove={(ev, x) => { if (ev.clientX === wheelAt.current.x && ev.clientY === wheelAt.current.y) return; setHov(x.type === 'sec' ? (x as SN).data.doc : x.id) }} onNodeMouseLeave={() => setHov(null)}
+                   onNodeMouseMove={(ev, x) => { if (ev.clientX === wheelAt.current.x && ev.clientY === wheelAt.current.y) return; setHov(x.type === 'sec' ? (x as SN).data.doc : x.id); setHovHead(x.type === 'sec' ? { doc: (x as SN).data.doc, line: (x as SN).data.h.line } : null) }} onNodeMouseLeave={() => { setHov(null); setHovHead(null) }}
                    nodesConnectable={false} elementsSelectable={editable}
                    elevateEdgesOnSelect={false} elevateNodesOnSelect={false} onlyRenderVisibleElements={!useGL && rfNodes.length > 300} // in hybrid mode the window is already small; culling would leave margin nodes unmeasured, and their edges undrawn
                    minZoom={useGL ? GL_MIN_ZOOM : 0.2} maxZoom={2.5} zoomOnDoubleClick={!useGL} proOptions={{ hideAttribution: true }} colorMode="dark">
@@ -743,7 +785,7 @@ function Side({ graph, live, error, off, setOff, cellList, entryInfo, mode, setV
   )
 }
 
-/** Legend. Three line types, three node colors, and subagents */
+/** Legend. Calls, references, provenance, node kinds, and subagents. */
 function Legend() {
   const { t } = useLang()
   const line = (dash: string | undefined, color: string) => (
@@ -752,6 +794,7 @@ function Legend() {
   return (
     <div className="legend">
       <div>{line(undefined, '#cbd5e1')}<span>{t.legendCall}</span></div>
+      <div>{line(undefined, '#2dd4bf')}<span>{t.legendData}</span></div>
       <div>{line('6 4', '#94a3b8')}<span>{t.legendRef}</span></div>
       <div>{line('6 4', '#f87171')}<span>{t.legendMissing}</span></div>
       <div><i style={{ background: KIND.task.color }} /><span>{t.legendTask}</span><i style={{ background: KIND.doc.color }} /><span>{t.legendDoc}</span><i style={{ background: KIND.file.color }} /><span>{t.legendFile}</span><i style={{ background: KIND.ghost.color }} /><span>{t.legendGhost}</span></div>
@@ -796,7 +839,7 @@ function Detail({ graph, node: n, go, selHead, isOpen, toggle, edit }: { graph: 
   const rawHere = edit.raw?.doc === n.id ? edit.raw : null
   const out = graph.edges.filter((e) => e.from === n.id), inn = graph.edges.filter((e) => e.to === n.id)
   const head = selHead?.doc === n.id ? n.headings.find((h) => h.line === selHead.line) : undefined
-  const leaf = n.kind === 'ghost' || n.kind === 'file' // no headings to expand or edit; a file shows its text instead
+  const leaf = n.kind === 'ghost' || n.kind === 'file'
   const row = (e: SilEdge, other: string) => (
     <div key={`${e.from}${e.to}${e.line}`} className="er">
       <span className="et">{e.type}</span> <a onClick={() => go(other)}>{other}</a>
@@ -845,7 +888,7 @@ function Detail({ graph, node: n, go, selHead, isOpen, toggle, edit }: { graph: 
       </Det>
       {/* Prompt. If a heading is selected, show it, its subheadings, and documents called in that section. Otherwise, show the whole document and all called documents.
           Do not show parent or sibling headings */}
-      {n.kind === 'file' ? <FileText id={n.id} /> : rawHere ? null : head ? (() => {
+      {n.kind === 'file' ? (n.file?.template || !n.file?.exists ? <div className="leaf muted">{n.desc}</div> : <FileText id={n.id} />) : rawHere ? null : head ? (() => {
         const hs = n.headings, i = hs.indexOf(head)
         let j = i + 1; while (j < hs.length && hs[j].level > head.level) j++
         const endLine = j < hs.length ? hs[j].line : Infinity
@@ -887,7 +930,7 @@ function Descendants({ graph, id, go, within }: { graph: Graph; id: string; go: 
     for (const e of graph.edges) {
       if (e.from !== from || seen.has(e.to)) continue
       if (depth === 0 && within && !within(e)) continue // Exclude calls outside the heading section
-      const t = byId.get(e.to); if (!t || t.kind === 'ghost' || t.kind === 'file') continue // a file has no prompt
+      const t = byId.get(e.to); if (!t || t.kind === 'ghost' || t.kind === 'file') continue // linked files have no prompt
       seen.add(e.to); chain.push({ node: t, depth, via: e }); walk(e.to, depth + 1)
     }
   }
@@ -901,6 +944,7 @@ function Descendants({ graph, id, go, within }: { graph: Graph; id: string; go: 
         <Det key={c.id} k={`c:${c.id}`} className="child" style={{ marginLeft: depth * 12 }} summary={<>
             <span className="muted">{t.promptOf}</span><a onClick={(ev) => { ev.preventDefault(); go(c.id) }}>{c.title}</a> <code className="muted">{c.id}</code>
             {via.isolated && <span className="badge iso">{t.subagent}</span>}
+            {via.noRules && <span className="badge norules" title={t.noRulesOf(via.noRules)}>{t.noRules}</span>}
             {via.sends.length > 0 && <span className="muted"> {t.send} {via.sends.join(', ')}</span>}
             {via.returns.length > 0 && <span className="muted"> {t.receive} {via.returns.join(', ')}</span>}
           </>}>

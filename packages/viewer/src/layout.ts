@@ -4,7 +4,9 @@
 import type { Graph, Edge as SilEdge, Node as SilNode } from '@silmari/core'
 
 // Base heights fit a button bar plus a one-line title and file name. Titles wrap, so the viewer reports real heights (LayoutOpts.heights)
-export const SIZE = { task: { w: 200, h: 84 }, doc: { w: 170, h: 76 }, file: { w: 170, h: 56 }, ghost: { w: 170, h: 56 } } as const
+export const SIZE = {
+  task: { w: 200, h: 84 }, doc: { w: 170, h: 76 }, file: { w: 170, h: 56 }, ghost: { w: 170, h: 56 },
+} as const
 /** Heading box inside an expanded node */
 export const SEC_W = 260, SEC_H = 66, SEC_GAP = 8, OPEN_HEAD = 70, OPEN_PAD = 12
 const LINE_H = 14, PAD = 8, GAP = 6
@@ -31,12 +33,12 @@ export function secPos(n: SilNode, i: number): { x: number; y: number } {
 }
 
 /** One label row. Send/receive uses a small tagged box. Condition and anchor show text only */
-export interface LabelRow { kind: 'send' | 'ret' | 'tools' | 'model' | 'under' | 'anchor'; tag: string | null; text: string }
+export interface LabelRow { kind: 'send' | 'ret' | 'tools' | 'model' | 'under' | 'anchor' | 'relation'; tag: string | null; text: string }
 const TAG_W = 58
-export function edgeLabelRows(e: SilEdge, tags: { send: string; ret: string; tools: string; model: string } = { send: 'send', ret: 'receive', tools: 'tools', model: 'model' }): LabelRow[] {
+export function edgeLabelRows(e: SilEdge, tags: { send: string; ret: string; tools: string; model: string; write?: string; read?: string } = { send: 'send', ret: 'receive', tools: 'tools', model: 'model' }): LabelRow[] {
   const rows: LabelRow[] = []
-  if (e.sends.length) rows.push({ kind: 'send', tag: tags.send, text: e.sends.join(', ') })
-  if (e.returns.length) rows.push({ kind: 'ret', tag: tags.ret, text: e.returns.join(', ') })
+  if (e.sends.length) rows.push({ kind: 'send', tag: e.type === 'write' ? (tags.write ?? 'write') : tags.send, text: e.sends.join(', ') })
+  if (e.returns.length) rows.push({ kind: 'ret', tag: e.type === 'read' ? (tags.read ?? 'import') : tags.ret, text: e.returns.join(', ') })
   // Tools and model belong to the call, so they sit on the edge label, not on the node (a file may be called with different ones)
   if (e.tools?.length) rows.push({ kind: 'tools', tag: tags.tools, text: e.tools.join(', ') })
   if (e.model) rows.push({ kind: 'model', tag: tags.model, text: e.model })
@@ -50,10 +52,10 @@ const textW = (s: string) => [...s].reduce((w, c) => w + (c.charCodeAt(0) > 0x2e
 export function labelBox(e: SilEdge): { w: number; h: number } {
   const rows = edgeLabelRows(e)
   if (!rows.length && !e.isolated) return { w: 0, h: 0 }
-  // Head (condition heading + subagent badge) / body (fixed tag width + value chips) / foot (anchor)
-  const under = rows.find((r) => r.kind === 'under'), anchor = rows.find((r) => r.kind === 'anchor')
-  const head = under || e.isolated ? 22 : 0
-  const headW = (under ? textW(under.text) + 8 : 0) + (e.isolated ? 92 : 0)
+  // Head (source heading → target heading, subagent badge) / body (fixed tag width + value chips)
+  const under = rows.find((r) => r.kind === 'under'), anchor = rows.find((r) => r.kind === 'anchor'), relation = rows.find((r) => r.kind === 'relation')
+  const head = under || anchor || e.isolated ? 22 : 0
+  const headW = (under ? textW('## ' + under.text) + 8 : 0) + (anchor ? textW(' → ## ' + anchor.text) : 0) + (e.isolated ? 92 : 0) + (e.noRules ? 78 : 0)
   // Tools and model: one line of solid chips under the head
   // One row for the model, one for the tools; each row is a label and its chips
   const runRows = (e.model ? 1 : 0) + (e.tools?.length ? 1 : 0)
@@ -62,16 +64,24 @@ export function labelBox(e: SilEdge): { w: number; h: number } {
   // Sections: head / run chips / anchor / body. A divider separates them
   const body = rows.filter((r) => r.kind === 'send' || r.kind === 'ret')
   const bodyW = Math.max(0, ...body.map((r) => TAG_W + 8 + r.text.split(', ').reduce((s, v) => s + textW(v) + 12 + 4, 0)))
-  const anchorH = anchor ? 20 : 0
-  const top = 21, topW = textW('→ ' + e.to) // Top: target md
-  const w = Math.max(topW, headW, runW, bodyW, anchor ? textW(anchor.text) : 0)
-  return { w: w + PAD * 2, h: top + head + run + anchorH + (body.length ? body.length * (LINE_H + 6) + 4 : 0) + PAD }
+  const anchorH = 0, relationH = relation ? 20 : 0 // the anchor sits on the head line now
+  const top = relation ? 0 : 21, topW = relation ? 0 : textW(e.from + ' → ' + e.to) // Provenance lines name the relation, not a generated internal id
+  const w = Math.max(topW, headW, runW, bodyW, anchor ? textW(anchor.text) : 0, relation ? textW(relation.text) : 0)
+  return { w: w + PAD * 2, h: top + head + run + anchorH + relationH + (body.length ? body.length * (LINE_H + 6) + 4 : 0) + PAD }
 }
 
 export interface Placed {
   nodes: Map<string, { x: number; y: number }>
   /** Edge index (position in g.edges) → center coordinates of its label */
   labels: Map<number, { x: number; y: number }>
+  /** Returned output follows a clear four-bend corridor. Coordinates are in graph space. */
+  returnRoutes: Map<number, { outX: number; inX: number; y: number; r: number }>
+  /** Imported file data (read edges) comes in from above: out of the file's right side, along the empty row the layout keeps at the
+   *  top of the reader's block (y), then down through the stacked import labels into the reader's top */
+  readRoutes: Map<number, { outX: number; y: number; drop?: boolean }> // drop: the file stands right above the reader and the line falls straight through the label
+  /** Node → x of its right edge at the expanded width its column reserves. Vertical runs start from here, so a collapsed node's
+   *  line does not cut through an expanded neighbour */
+  right: Map<string, number>
   /** Index of an edge that creates a cycle (a back edge). The second edge in document A → B → A */
   cycles: Set<number>
   /** Index of an edge within one column. It loops in from the right */
@@ -122,7 +132,8 @@ export function cells(g: Graph, visible: Set<string>): Cell[] {
     if (entry && c.includes(entry)) return entry
     const set = new Set(c), inn = new Set<string>(), outs = new Map<string, number>()
     for (const e of g.edges) if (set.has(e.from) && set.has(e.to) && e.from !== e.to) { inn.add(e.to); outs.set(e.from, (outs.get(e.from) ?? 0) + 1) }
-    const roots = c.filter((id) => !inn.has(id)).sort((a, b) => (outs.get(b) ?? 0) - (outs.get(a) ?? 0))
+    const kind = new Map(g.nodes.map((n) => [n.id, n.kind]))
+    const roots = c.filter((id) => !inn.has(id)).sort((a, b) => Number(kind.get(a) === 'file') - Number(kind.get(b) === 'file') || (outs.get(b) ?? 0) - (outs.get(a) ?? 0)) // a file that is only imported is not the flow's name
     return roots[0] ?? c[0]
   }
   const titleOf = (c: string[]) => { const r = rootOf(c); return g.nodes.find((n) => n.id === r)?.title ?? r }
@@ -144,11 +155,14 @@ export function layout(g: Graph, visible: Set<string>, open: Set<string> = new S
   boxes.forEach((b, k) => { const c = k % cols, r = Math.floor(k / cols); colW[c] = Math.max(colW[c] ?? 0, b.w); rowH[r] = Math.max(rowH[r] ?? 0, b.h) })
   const colX = colW.map((_, c) => colW.slice(0, c).reduce((a, w) => a + w + GRID_GAP, 0))
   const rowY = rowH.map((_, r) => rowH.slice(0, r).reduce((a, h) => a + h + GRID_GAP, 0))
-  const out: Placed = { nodes: new Map(), labels: new Map(), cycles: new Set(), sameCol: new Set() }
+  const out: Placed = { nodes: new Map(), labels: new Map(), returnRoutes: new Map(), readRoutes: new Map(), right: new Map(), cycles: new Set(), sameCol: new Set() }
   comps.forEach((c, k) => {
     const { placed } = layoutOne(g, c, open, sizes, pinned, { x: colX[k % cols], y: rowY[Math.floor(k / cols)] }, opts)
     for (const [id, p] of placed.nodes) out.nodes.set(id, p)
     for (const [i, p] of placed.labels) out.labels.set(i, p)
+    for (const [i, p] of placed.returnRoutes) out.returnRoutes.set(i, p)
+    for (const [i, p] of placed.readRoutes) out.readRoutes.set(i, p)
+    for (const [id, x] of placed.right) out.right.set(id, x)
     for (const i of placed.cycles) out.cycles.add(i)
     for (const i of placed.sameCol) out.sameCol.add(i)
   })
@@ -225,17 +239,26 @@ function layoutOne(g: Graph, ids: string[], open: Set<string>, sizes: Map<number
   const byId = new Map(g.nodes.map((n) => [n.id, n]))
   // Always use expanded width so expansion does not move nearby columns. Use current height. Expansion moves only lower nodes
   const size = (id: string) => ({ w: nodeSize(byId.get(id)!, true).w, h: open.has(id) ? nodeSize(byId.get(id)!, true).h : (opts.heights?.get(id) ?? nodeSize(byId.get(id)!, false).h) })
-  const { edges, sorted, rank, parent: bfsParent, kids, back, sameCol } = skeleton(g, ids)
+  // A file that is only imported (read edges out, nothing in: nobody stores it, nothing else links it) stands above its first
+  // reader, in the row the reader keeps for its imports, instead of being a root of its own in the first column
+  const incoming = new Set<string>(), nonReadOut = new Set<string>()
+  for (const e of g.edges) if (e.from !== e.to && idSet.has(e.from) && idSet.has(e.to)) { incoming.add(e.to); if (e.type !== 'read') nonReadOut.add(e.from) }
+  const hostOf = new Map<string, string>() // file → the reader it stands above
+  for (const e of g.edges) if (e.type === 'read' && e.from !== e.to && idSet.has(e.from) && idSet.has(e.to) && !incoming.has(e.from) && !nonReadOut.has(e.from) && !hostOf.has(e.from)) hostOf.set(e.from, e.to)
+  const core = ids.filter((id) => !hostOf.has(id))
+  const { edges, sorted, rank, parent: bfsParent, kids, back, sameCol } = skeleton(g, core)
+  const hostedReads = g.edges.map((e, i) => ({ e, i })).filter(({ e }) => e.type === 'read' && hostOf.has(e.from) && idSet.has(e.to))
 
   // 4. Column widths and label widths between columns
   const cols = Math.max(0, ...[...rank.values()]) + 1
   const colW = Array.from({ length: cols }, () => 0)
-  for (const id of ids) colW[rank.get(id)!] = Math.max(colW[rank.get(id)!], size(id).w)
+  for (const id of core) colW[rank.get(id)!] = Math.max(colW[rank.get(id)!], size(id).w)
   const gapW = Array.from({ length: cols }, () => 0) // gapW[r] = between columns r and r+1
   const labelOf = new Map<number, { w: number; h: number }>()
   for (const { e, i } of edges) {
     const b = boxOf(i); if (!b.h) continue
     labelOf.set(i, b)
+    if (e.type === 'read') continue // import labels stack above the reader (below), not in a lane
     const lo = Math.min(rank.get(e.from)!, rank.get(e.to)!), hi = Math.max(rank.get(e.from)!, rank.get(e.to)!)
     const gi = lo // For one-column edges, use the gap to that column's right (hi === lo)
     void hi
@@ -251,20 +274,53 @@ function layoutOne(g: Graph, ids: string[], open: Set<string>, sizes: Map<number
   const blockH = new Map<string, number>()
   // A child's slot is also tall enough for the labels of the calls from its parent, so each label can sit at its child's height.
   // In 'flow' order only the first call's label sits at the child (later calls line up below in line order), so the slot holds one label
-  // and the parent's block instead grows to fit the whole label column
+  // and the children are placed against the label column instead (flowSlots)
   const flow = opts.labelOrder === 'flow'
-  const labelsH = (id: string) => { const p = bfsParent.get(id); let h = -GAP; for (const { e, i } of edges) if (e.from === p && e.to === id && labelOf.has(i)) { h += labelOf.get(i)!.h + GAP; if (flow) break } return h }
-  const labelStack = (id: string) => { const ks = new Set(kids.get(id) ?? []); let h = -GAP; for (const { e, i } of edges) if (e.from === id && ks.has(e.to) && labelOf.has(i)) h += labelOf.get(i)!.h + GAP; return h }
+  const labelsH = (id: string) => { const p = bfsParent.get(id); let h = -GAP; for (const { e, i } of edges) if (e.from === p && e.to === id && e.type !== 'read' && labelOf.has(i)) { h += labelOf.get(i)!.h + GAP; if (flow) break } return h }
+  // 'flow': the parent's calls are walked in line order. A first call places its child so that the call's label sits at the child's
+  // height and below every label before it; a repeat call to an earlier child only takes its slot in the label column, so the
+  // children after it move down below that label. Otherwise their labels would be pushed off their height and the lines would climb back
+  const flowSlots = (id: string): { tops: Map<string, number>; h: number } => {
+    const ks = new Set(kids.get(id) ?? []), tops = new Map<string, number>()
+    let cur = 0, lab = 0, bottom = 0
+    for (const { e, i } of edges) {
+      if (e.from !== id || !ks.has(e.to) || e.type === 'read') continue
+      const h = labelOf.get(i)?.h ?? 0
+      if (!tops.has(e.to)) {
+        const bh = blockH.get(e.to)!, center = Math.max(cur + bh / 2, h ? lab + h / 2 : 0), top = center - bh / 2
+        tops.set(e.to, top); cur = top + bh + NODESEP; bottom = Math.max(bottom, top + bh)
+        if (h) lab = center + h / 2 + GAP
+      } else if (h) { lab += h + GAP; bottom = Math.max(bottom, lab - GAP) }
+    }
+    return { tops, h: bottom }
+  }
+  // A file import (read edge) comes in from above. The reader's block keeps an empty row on top: the import labels stacked in line
+  // order plus a gap above them for the line to travel along. The node and its children all start below that row
+  for (const { i } of hostedReads) { const b = boxOf(i); if (b.h) labelOf.set(i, b) }
+  const readsOf = new Map<string, { e: SilEdge; i: number }[]>()
+  for (const x of [...edges, ...hostedReads].sort((a, b) => a.i - b.i)) if (x.e.type === 'read') (readsOf.get(x.e.to) ?? readsOf.set(x.e.to, []).get(x.e.to)!).push(x)
+  // The row holds, top to bottom: each hosted file over its own label, then (when some file stands elsewhere) a gap for the line
+  // that comes along the row, then the labels of those imports, then the node
+  const reserve = (id: string) => {
+    const rs = readsOf.get(id); if (!rs) return 0
+    let h = 2 * GAP, far = false
+    for (const { e, i } of rs) { h += (labelOf.get(i)?.h ?? 0) + GAP; if (hostOf.get(e.from) === id) h += nodeSize(byId.get(e.from)!, false).h + GAP; else far = true }
+    return h + (far ? GAP : 0)
+  }
   const measure = (id: string): number => {
     const ks = kids.get(id) ?? []
-    const h = Math.max(size(id).h, labelsH(id), ks.reduce((a, k) => a + measure(k), 0) + Math.max(0, ks.length - 1) * NODESEP, flow ? labelStack(id) : 0)
+    const kidsH = ks.reduce((a, k) => a + measure(k), 0) + Math.max(0, ks.length - 1) * NODESEP
+    const h = reserve(id) + Math.max(size(id).h, labelsH(id), kidsH, flow ? flowSlots(id).h : 0)
     blockH.set(id, h); return h
   }
   const nodes = new Map<string, { x: number; y: number }>()
+  const blockTop = new Map<string, number>()
   const place = (id: string, top: number) => {
-    nodes.set(id, { x: colX[rank.get(id)!], y: top + (blockH.get(id)! - size(id).h) / 2 })
-    let cur = top
-    for (const k of kids.get(id) ?? []) { place(k, cur); cur += blockH.get(k)! + NODESEP }
+    blockTop.set(id, top)
+    const t = top + reserve(id)
+    nodes.set(id, { x: colX[rank.get(id)!], y: t + (blockH.get(id)! - reserve(id) - size(id).h) / 2 })
+    if (flow) { const { tops } = flowSlots(id); for (const k of kids.get(id) ?? []) place(k, t + tops.get(k)!) }
+    else { let cur = t; for (const k of kids.get(id) ?? []) { place(k, cur); cur += blockH.get(k)! + NODESEP } }
   }
   let top = MARGIN + origin.y
   for (const id of sorted) if (!bfsParent.has(id)) { measure(id); place(id, top); top += blockH.get(id)! + NODESEP }
@@ -276,7 +332,7 @@ function layoutOne(g: Graph, ids: string[], open: Set<string>, sizes: Map<number
   const center = (id: string) => { const p = at(id), s = size(id); return { x: p.x + s.w / 2, y: p.y + s.h / 2 } }
   const want: { i: number; sy: number; x: number; y: number; b: { w: number; h: number } }[] = []
   for (const { e, i } of edges) {
-    const b = labelOf.get(i); if (!b) continue
+    const b = labelOf.get(i); if (!b || e.type === 'read') continue
     const lo = Math.min(rank.get(e.from)!, rank.get(e.to)!)
     // A label for a call one column to the right sits at the height of the node it goes to, so a parent's labels line up with its children
     // inside the same rectangle, in call order. Other edges (same column, back edges) sit at the midpoint of both ends
@@ -320,11 +376,53 @@ function layoutOne(g: Graph, ids: string[], open: Set<string>, sizes: Map<number
     labels.set(l.i, { x: l.x, y: top + l.b.h / 2 })
     put.push({ x: l.x, w: l.b.w, bottom: top + l.b.h })
   }
-  // The box this part occupies, measured from the origin (nodes and labels)
+  // Import labels stack above the reader, centered on it, in line order top to bottom. The stack fills the row the reserve kept at
+  // the top of the reader's block (a dragged reader has no block, so it stacks right above the node). Nearest the node: labels of
+  // imports whose file stands elsewhere — their line comes along the row just above them, which the reserve keeps empty across
+  // the block's columns. Above that row: each hosted file right over its own label, so its line drops straight through
+  const readRoutes = new Map<number, { outX: number; y: number; drop?: boolean }>()
+  for (const [id, rs] of readsOf) {
+    const p = at(id), x = p.x + nodeSize(byId.get(id)!, open.has(id)).w / 2 // the drawn width: size() reserves the expanded width for the column
+    const own = rs.filter(({ e }) => hostOf.get(e.from) === id), far = rs.filter(({ e }) => hostOf.get(e.from) !== id)
+    let y = pinned[id] ? p.y - GAP : Math.min(p.y, blockTop.get(id)! + reserve(id)) - GAP
+    for (const { i } of [...far].reverse()) { const b = labelOf.get(i); if (b) { labels.set(i, { x, y: y - b.h / 2 }); y -= b.h + GAP } }
+    const row = y - GAP / 2
+    if (far.length) y -= GAP
+    for (const { e, i } of [...own].reverse()) {
+      const b = labelOf.get(i); if (b) { labels.set(i, { x, y: y - b.h / 2 }); y -= b.h + GAP }
+      const fs = nodeSize(byId.get(e.from)!, false); nodes.set(e.from, { x: x - fs.w / 2, y: y - fs.h }); y -= fs.h + GAP
+    }
+    for (const { e, i } of far) { const f = at(e.from); readRoutes.set(i, { outX: f.x + size(e.from).w + 20, y: row }) }
+    for (const { i } of own) readRoutes.set(i, { outX: 0, y: 0, drop: true })
+  }
+  const rightEdge = new Map(ids.map((id) => [id, at(id).x + size(id).w]))
+  // A link that runs back to an earlier column (a call into an ancestor, a call into a node that a shallower caller placed there,
+  // data written back, a reference to an earlier document) cannot leave the source's right side and reach the target's left side
+  // without crossing its own column. It takes a return lane: a clear horizontal corridor between nodes, or, when none fits, a lane
+  // below the local flow. Imports have their own route from above
+  const returns = edges.filter(({ e, i }) => !sameCol.has(i) && e.type !== 'read' && rank.get(e.to)! < rank.get(e.from)!)
+  const returnRoutes = new Map<number, { outX: number; inX: number; y: number; r: number }>()
+  const rects = ids.map((id) => { const p = at(id), s = size(id); return { id, x: p.x, y: p.y, w: s.w, h: s.h } })
+  const used: { y: number; h: number }[] = []
+  let returnRail = Math.max(...rects.map((r) => r.y + r.h)) + RANK_MARGIN
+  for (const { e, i } of returns) {
+    const b = labelOf.get(i), h = Math.max(20, b?.h ?? 0), from = at(e.from), to = at(e.to), fs = size(e.from)
+    const outX = from.x + fs.w + 20, inX = to.x - 20, lo = Math.min(outX, inX), hi = Math.max(outX, inX), mid = (center(e.from).y + center(e.to).y) / 2
+    // The lane carries the edge's label (h tall, centered on y), so the whole band must miss every node and every label placed so far
+    const obs = [...rects, ...[...labels].filter(([j]) => j !== i).map(([j, p]) => { const lb = labelOf.get(j)!; return { id: '', x: p.x - lb.w / 2, y: p.y - lb.h / 2, w: lb.w, h: lb.h } })]
+    const candidates = [...new Set([mid, ...obs.flatMap((o) => [o.y - 4 - h / 2, o.y + o.h + 4 + h / 2])])].sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid))
+    const clear = (y: number) => obs.every((o) => o.id === e.from || o.id === e.to || y + h / 2 < o.y - 4 || y - h / 2 > o.y + o.h + 4 || o.x + o.w < lo || o.x > hi)
+    let y = candidates.find((v) => clear(v) && used.every((u) => Math.abs(v - u.y) >= (h + u.h) / 2 + NODESEP))
+    if (y === undefined) { y = returnRail + h / 2; returnRail += h + NODESEP }
+    used.push({ y, h }); returnRoutes.set(i, { outX, inX, y, r: 12 })
+    if (b) labels.set(i, { x: (outX + inX) / 2, y })
+  }
+  // The box this part occupies, measured from the origin (nodes, labels, and return lanes)
   let right = origin.x, bottom = origin.y
   for (const [id, p] of nodes) { const s = size(id); right = Math.max(right, p.x + s.w); bottom = Math.max(bottom, p.y + s.h) }
   for (const [i, p] of labels) { const b = labelOf.get(i)!; right = Math.max(right, p.x + b.w / 2); bottom = Math.max(bottom, p.y + b.h / 2) }
-  return { placed: { nodes, labels, cycles: back, sameCol }, box: { w: right - origin.x + MARGIN, h: bottom - origin.y + MARGIN } }
+  if (returns.length) bottom = Math.max(bottom, returnRail)
+  return { placed: { nodes, labels, returnRoutes, readRoutes, right: rightEdge, cycles: back, sameCol }, box: { w: right - origin.x + MARGIN, h: bottom - origin.y + MARGIN } }
 }
 
 /**

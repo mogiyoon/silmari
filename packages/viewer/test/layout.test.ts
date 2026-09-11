@@ -47,6 +47,44 @@ test('layout: handles multiple parallel edges and stacks labels vertically', () 
   assert.equal(new Set([...labels.values()].map((c) => c.x)).size, 1, 'the same pair has the same x')
 })
 
+test('layout: data imported from a generated file comes in from above along the import row, not through the return lane', () => {
+  const node = (id: string, kind: 'task' | 'file') => ({ id, kind, title: id, desc: '', headings: [], contract: null, ...(kind === 'file' ? { file: { exists: false, planned: true } } : {}) })
+  const edge = (from: string, to: string, type: 'call' | 'read' | 'write') => ({ from, to, type, line: 1, under: [], sends: [], returns: [], tools: [], model: null, isolated: false, range: { start: 0, end: 0 } })
+  const g = {
+    nodes: [node('flow.md', 'task'), node('build.md', 'task'), node('wrap.md', 'task'), node('builder.mjs', 'file'), node('out/report.json', 'file')],
+    edges: [edge('flow.md', 'build.md', 'call'), edge('flow.md', 'wrap.md', 'call'), edge('build.md', 'builder.mjs', 'call'), edge('builder.mjs', 'out/report.json', 'write'), edge('out/report.json', 'wrap.md', 'read')],
+    diagnostics: [], stats: { files: 5, nodes: 5, edges: 5, nodesByKind: { task: 3, doc: 0, file: 2, ghost: 0 }, edgesByType: { call: 3, read: 1, write: 1, ref: 0, mention: 0 } }, entry: [],
+  } as any
+  const placed = layout(g, new Set(g.nodes.map((n: { id: string }) => n.id)))
+  assert.ok(placed.readRoutes.has(4), 'out/report.json → wrap.md uses the import row')
+  assert.ok(!placed.returnRoutes.has(4), 'an import is not returned output')
+})
+
+test('layout: an import label stacks above the reader, and the reader, its children and the row above all keep clear of it', async () => {
+  const { parseDoc } = await import('@silmari/core')
+  const docs = new Map([
+    ['흐름.md', parseDoc('흐름.md', '# 흐름\n\n[만들기](만들기.md)에 {{>x}}를 넘긴다.\n\n[일](일.md)에 {{>x}}를 넘긴다.\n')],
+    ['만들기.md', parseDoc('만들기.md', '# 만들기\n\n[보고서](out/report.json)에 {{>report}}를 저장한다.\n')],
+    ['일.md', parseDoc('일.md', '# 일\n\n[보고서](out/report.json)를 {{<report}}로 불러온다.\n\n[하위](하위.md)에 {{>x}}를 넘긴다.\n')],
+    ['하위.md', parseDoc('하위.md', '# 하위\n\n## 하는 일\n\n한다.\n')],
+  ])
+  const g = buildGraph(docs, { entry: ['흐름.md'], exists: () => true })
+  const ri = g.edges.findIndex((e) => e.type === 'read')
+  assert.ok(ri >= 0 && g.edges[ri].from === 'out/report.json' && g.edges[ri].to === '일.md', 'the read edge runs from the file to the reader')
+  const { nodes, labels, readRoutes } = layout(g, new Set(g.nodes.map((n) => n.id)))
+  const p = (id: string) => nodes.get(id)!, lab = labels.get(ri)!, box = labelBox(g.edges[ri]), route = readRoutes.get(ri)!
+  // label centered above the reader
+  assert.equal(lab.x, p('일.md').x + SIZE.task.w / 2)
+  assert.ok(lab.y + box.h / 2 < p('일.md').y, 'label sits above the reader')
+  // the row the line travels along is above the label, and below everything the earlier sibling block placed (the file included)
+  assert.ok(route.y < lab.y - box.h / 2, 'row above the label stack')
+  assert.ok(route.y > p('out/report.json').y + SIZE.file.h, 'row below the writer block')
+  assert.ok(route.y > p('만들기.md').y + SIZE.task.h)
+  // the reader's child starts below the row, so the row is empty across the block
+  assert.ok(p('하위.md').y > route.y, 'children start below the import row')
+  assert.equal(route.outX, p('out/report.json').x + SIZE.file.w + 20)
+})
+
 test('layout: in a cycle-only group (planning → implementation → review → planning), the start is planning and the cycle edge is review → planning', async () => {
   const { parseDoc } = await import('@silmari/core')
   const docs = new Map([
@@ -55,11 +93,50 @@ test('layout: in a cycle-only group (planning → implementation → review → 
     ['검토.md', parseDoc('검토.md', '# 검토\n\n## 하는 일\n\n결과를 본다.\n\n## 지적이 크면\n\n[기획](기획.md)에 {{>지적}}을 전달해 {{<계획}}을 다시 받는다.\n')],
   ])
   const g = buildGraph(docs)
-  const { nodes, cycles } = layout(g, new Set(g.nodes.map((n) => n.id)))
+  const { nodes, cycles, returnRoutes } = layout(g, new Set(g.nodes.map((n) => n.id)))
   const x = (id: string) => nodes.get(id)!.x
   assert.ok(x('기획.md') < x('구현.md') && x('구현.md') < x('검토.md'), `order planning < implementation < review: ${x('기획.md')} ${x('구현.md')} ${x('검토.md')}`)
   const back = [...cycles].map((i) => `${g.edges[i].from}→${g.edges[i].to}`)
   assert.deepEqual(back, ['검토.md→기획.md'])
+  assert.ok(returnRoutes.has(g.edges.findIndex((e) => e.from === '검토.md' && e.to === '기획.md')), 'child → ancestor call uses a four-bend return route')
+})
+
+test('layout: a file that is only imported stands above its first reader and drops its line straight through the label', async () => {
+  const { parseDoc } = await import('@silmari/core')
+  const docs = new Map([
+    ['흐름.md', parseDoc('흐름.md', '# 흐름\n\n[일](일.md)에 {{>x}}를 넘긴다.\n\n[둘](둘.md)에 {{>x}}를 넘긴다.\n')],
+    ['일.md', parseDoc('일.md', '# 일\n\n[규칙](rules.json)을 {{<rules}}로 불러온다.\n')],
+    ['둘.md', parseDoc('둘.md', '# 둘\n\n[규칙](rules.json)을 {{<rules}}로 불러온다.\n')],
+  ])
+  const g = buildGraph(docs, { entry: ['흐름.md'], exists: () => true })
+  const reads = g.edges.map((e, i) => ({ e, i })).filter(({ e }) => e.type === 'read')
+  assert.equal(reads.length, 2)
+  const { nodes, labels, readRoutes } = layout(g, new Set(g.nodes.map((n) => n.id)))
+  const p = (id: string) => nodes.get(id)!, first = reads[0], second = reads[1], host = first.e.to, other = second.e.to
+  // hosted by the first reader (edge order): centered above it, over its own label, not a root in the first column
+  assert.equal(p('rules.json').x + SIZE.file.w / 2, p(host).x + SIZE.task.w / 2)
+  assert.ok(p('rules.json').x > p('흐름.md').x + SIZE.task.w, 'the file is not in the root column')
+  const lab = labels.get(first.i)!, box = labelBox(first.e)
+  assert.ok(p('rules.json').y + SIZE.file.h < lab.y - box.h / 2 && lab.y + box.h / 2 < p(host).y, 'file, then label, then reader')
+  assert.equal(readRoutes.get(first.i)!.drop, true)
+  // the other reader gets a label above itself and a line along its row from where the file stands
+  assert.equal(readRoutes.get(second.i)!.drop, undefined)
+  assert.ok(labels.get(second.i)!.y < p(other).y)
+})
+
+test('layout: a call that runs back to an earlier column takes the return lane even when the target is not the caller\'s ancestor', async () => {
+  const { parseDoc } = await import('@silmari/core')
+  const docs = new Map([
+    ['흐름.md', parseDoc('흐름.md', '# 흐름\n\n[가](가.md)에 {{>x}}를 넘긴다.\n\n[다](다.md)에 {{>x}}를 넘긴다.\n')],
+    ['가.md', parseDoc('가.md', '# 가\n\n[나](나.md)에 {{>x}}를 넘긴다.\n')],
+    ['나.md', parseDoc('나.md', '# 나\n\n[다](다.md)에 {{>x}}를 넘긴다.\n')],
+    ['다.md', parseDoc('다.md', '# 다\n\n## 하는 일\n\n한다.\n')],
+  ])
+  const g = buildGraph(docs, { entry: ['흐름.md'] })
+  const i = g.edges.findIndex((e) => e.from === '나.md' && e.to === '다.md')
+  const { returnRoutes, nodes } = layout(g, new Set(g.nodes.map((n) => n.id)))
+  assert.ok(nodes.get('다.md')!.x < nodes.get('나.md')!.x, '다 stays in the shallow column 흐름 gave it')
+  assert.ok(returnRoutes.has(i), '나 → 다 runs back through the return lane instead of across its own node')
 })
 
 test('layout: the configured entry point is a root, and orphan references stay visible below it', async () => {
@@ -151,9 +228,18 @@ test('layout: a parent sits at the vertical center of its children block, and th
 test("layout option labelOrder 'flow': labels follow the parent's line order top to bottom (1·2·3·4·5·6), the repeat call below the later one", async () => {
   const root = resolve(import.meta.dirname, '../../core/test/fixtures/after')
   const g = buildGraph(loadDir(root, [], readConfig(root).words), { exists: existsIn(root) })
-  const { labels } = layout(g, new Set(g.nodes.map((n) => n.id)), new Set(), undefined, {}, { labelOrder: 'flow' })
-  const ys = g.edges.map((e, i) => ({ e, i })).filter(({ e, i }) => e.from === 'flow.md' && labels.has(i)).map(({ i }) => labels.get(i)!.y)
+  const { labels, nodes } = layout(g, new Set(g.nodes.map((n) => n.id)), new Set(), undefined, {}, { labelOrder: 'flow' })
+  const calls = g.edges.map((e, i) => ({ e, i })).filter(({ e, i }) => e.from === 'flow.md' && labels.has(i))
+  const ys = calls.map(({ i }) => labels.get(i)!.y)
   for (let k = 1; k < ys.length; k++) assert.ok(ys[k] > ys[k - 1], `label ${k} below label ${k - 1}`)
+  // The first call to each child still sits at the child's height: the children move down to make room for the repeat call's label,
+  // so a later first call (6. wrap-up after the repeat 5. implement) is not pushed off its child
+  const seen = new Set<string>()
+  for (const { e, i } of calls) {
+    if (seen.has(e.to)) continue; seen.add(e.to)
+    const p = nodes.get(e.to)!, n = g.nodes.find((x) => x.id === e.to)!
+    assert.ok(Math.abs(labels.get(i)!.y - (p.y + SIZE[n.kind].h / 2)) < 1, `first call to ${e.to} sits at its height`)
+  }
 })
 
 test('entry view: the entry document registers flows by linking them; start files sit before it; downstream stops at the entry; shared documents belong to both', async () => {

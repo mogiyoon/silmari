@@ -22,7 +22,7 @@ export function format(diags: Diagnostic[]): string {
 /** Always printed: whether the graph is structured shows here. A migration that changed nothing leaves task 0 · call 0 */
 export const summary = (g: { stats: { files: number; nodesByKind: Partial<Record<string, number>>; edgesByType: Partial<Record<string, number>> } }): string => {
   const k = g.stats.nodesByKind, e = g.stats.edgesByType
-  return `files ${g.stats.files} · task ${k.task ?? 0} · doc ${k.doc ?? 0} · file ${k.file ?? 0} · ghost ${k.ghost ?? 0} · call ${e.call ?? 0} · ref ${e.ref ?? 0} · mention ${e.mention ?? 0}`
+  return `files ${g.stats.files} · task ${k.task ?? 0} · doc ${k.doc ?? 0} · file ${k.file ?? 0} · ghost ${k.ghost ?? 0} · call ${e.call ?? 0} · read ${e.read ?? 0} · write ${e.write ?? 0} · ref ${e.ref ?? 0} · mention ${e.mention ?? 0}`
 }
 
 export async function lint(dir: string, opt: { strict?: boolean; json?: boolean } = {}): Promise<number> {

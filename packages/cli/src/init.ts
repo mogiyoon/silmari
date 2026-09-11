@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } fr
 import { ENTRY_MAIN, CONFIG_PATH, loadDir, readConfig, findProjectRoot } from '@silmari/core'
 import { silVersion, compareVersions } from './version.ts'
 import { UPDATE_NOTES } from './updates.ts'
+import { backupDocs } from './backup.ts'
 /** .sil/config.yaml. The parser drops everything after #. */
 const template = (entry: string[], lang: string, version: string) => `# silmari settings. Everything works without this file. Every key is optional.
 entry: [${entry.join(', ')}]   # entry point: the root of the graph. Documents called from here form the flow
@@ -38,7 +39,7 @@ Two principles hold everywhere: **the notation has no language** (every marker i
 
 ## Notation
 
-Six symbols. The words inside them are free, in any language.
+Eight symbols. The words inside them are free, in any language.
 
 | Symbol | Meaning |
 |---|---|
@@ -47,12 +48,15 @@ Six symbols. The words inside them are free, in any language.
 | \`{{<name}}\` | Receive this value from the call |
 | \`{{+…}}\` | The tools the subagent may use, in your words: \`{{+read}}\` \`{{+파일 읽기}}\` |
 | \`{{#…}}\` | The model the subagent runs on, in your words: \`{{#fast}}\` \`{{#가장 작은 모델}}\` |
+| \`{{-…}}\` | Run this subagent without the project start files (CLAUDE.md · AGENTS.md · …), in your words: \`{{-without the project rules}}\` \`{{-프로젝트 규칙 없이}}\` |
+| \`## {{=Run the CLI}}\` | The first link in this section is executed, even when it carries no values |
 | \`## … ((…))\` | A double-parenthesis label at the end of a heading: the calls under it run as a subagent (isolated). \`((use a subagent via sil run))\` |
 
-- A link can point at any file: \`[spec](../spec.json)\`, \`[log](out/run.log)\`, a folder. The graph shows it and lint checks that it exists; nothing but md is parsed. Every file an agent reads is a link. A file name in backticks is not a link: it makes no edge and never reaches a subagent. A file the step creates is an output value (\`- report (path)\` under \`## {{<Outputs}}\`), not a link.
+- A link can point at any file: \`[spec](../spec.json)\`, \`[log](out/run.log)\`, a folder. Nothing but md is parsed. On a non-md file link, \`{{>name}}\` writes the value into the file and \`{{<name}}\` imports it. A declared output path may be absent until runtime; the graph shows a planned file instead of a broken link.
 - A link target may hold a value: \`[the reference](../references/{{>topic}}.md)\`. The value is one of this document's inputs, or a value received from an earlier call, and is filled in when the step runs. Lint checks that at least one file matches the pattern.
 - A condition is a heading. Calls under \`## If the review is major\` happen under that condition. A heading that calls an earlier document again must state when it ends.
 - In the called document, the contract is a list under a heading that is exactly one marker: \`## {{>Inputs}}\` for inputs, \`## {{<Outputs}}\` for outputs. Any heading level, any words: \`### {{>입력}}\`. The item name is the first word; an optional \`(path)\`, \`(text)\` or \`(json)\` after it says what kind of value it is (\`- posting (path) — the file to read\`). Say whether a value is a path or the content itself; agents confuse the two.
+- A deterministic task uses a heading such as \`## {{=Run the CLI}}\`. The first link in that section is the execution target. Later non-md file links with \`{{>name}}\` are files written by that target; links with \`{{<name}}\` import files. Keep the exact shell commands in an ordinary code block. silmari draws real and planned file nodes but does not execute the commands.
 - A document is a task when it sends or receives values, is called with values, or has a contract. Otherwise it is a reference. To override the guess, the only frontmatter silmari reads: \`sil:\` then \`  type: task\` (or \`doc\`).
 - The condition of a call is every heading above it, the H1 included. Value names are one word; the label inside \`(( ))\` is written like an instruction to the model.
 
@@ -63,6 +67,7 @@ Six symbols. The words inside them are free, in any language.
    where \`<runtime>\` is the CLI you are running in, and \`<runtime flags>\` are that CLI's own flags that apply the model named by \`{{#…}}\` and restrict the tools to those named by \`{{+…}}\`. For claude: \`--model <name> --tools <Tool,Tool>\`. For codex: \`-m <name> -s <sandbox>\`. Example:
    \`sil run claude --step flow.md#1 --send posting=@posting.md --model haiku --tools Read\`
    Use the JSON it prints as the received values. \`sil run --help\` lists the runtimes and their flags.
+   \`{{-…}}\` on the call line needs no flag of yours: \`sil run\` adds the runtime's own switch for the project start files.
 2. If the heading has no \`(( ))\` label, read the called file and follow its steps yourself. Tools and model do not apply; you keep your own.
 3. Values on the call line (\`{{>name}}\`) exist only for this run. Fill them in and pass each one with \`--send name=…\`. The hint on that name in the called document's \`{{>…}}\` list says what to send, and \`sil run\` checks it before anything starts:
    - No hint, or \`(text)\`: the value itself. \`--send tone=formal\`, or \`--send note=@memo.md\` to send a file's content. Nothing is checked. The subagent sees the text either way and cannot tell the two apart.
@@ -75,9 +80,9 @@ Six symbols. The words inside them are free, in any language.
 
 A step whose heading ends with a \`(( ))\` label runs as a subagent: a fresh session that sees only what this section describes.
 
-1. **What a subagent knows.** The called document (its body is the prompt), the values sent on the call line, and every file the called document links to. Nothing else. It does not see the caller's conversation or the flow document. It starts in the project root (the folder with \`.sil/\`); \`sil run\` rewrites every link in the document and every \`(path)\` value to that root, so the paths it opens are the ones the document meant.
-2. **Rules travel by link.** If the subagent must follow project rules (style, language, safety), the called document links them: \`Follow the [writing rules](../RULES.md).\` The graph shows the link; lint checks that the file exists. Rules that are not linked do not reach the subagent.
-3. **Start-file rules are not inherited.** \`sil run\` starts the subagent with the runtime's project start files switched off (Claude Code: \`--setting-sources user\`; Codex: \`-c project_doc_max_bytes=0\`), so a subagent's rules come only from links in its own document. Explicit reads still work. Where a runtime has no such switch, the start files are inherited; this document is written so that changes nothing for a single isolated step.
+1. **What a subagent knows.** The called document (its body is the prompt), the values sent on the call line, every file the called document links to, and the project start files of the runtime it runs on (CLAUDE.md · AGENTS.md · …), unless the call line cuts them with \`{{-…}}\`. It does not see the caller's conversation or the flow document. It starts in the project root (the folder with \`.sil/\`); \`sil run\` rewrites every link in the document and every \`(path)\` value to that root, so the paths it opens are the ones the document meant.
+2. **Rules that are not in a start file travel by link.** A rule the subagent must follow but that no start file carries goes in the called document as a link: \`Follow the [writing rules](../RULES.md).\` The graph shows the link; lint checks that the file exists. Under \`{{-…}}\` this is the only way rules reach the step, so write the sentence as an instruction, not as a note.
+3. **Cut the project rules with \`{{-…}}\`.** By default a subagent keeps the runtime's project start files, which is what people expect. Write \`{{-…}}\` on the call line when a step must judge by its own document alone, and \`sil run\` switches them off for that run (Claude Code: \`--setting-sources user\`; Codex: \`-c project_doc_max_bytes=0\`). A runtime with no such switch refuses the step instead of running it with the rules still in. The first line of every run says which way it went.
 4. **Tools and model.** \`{{+…}}\` and \`{{#…}}\` describe them in any words. The orchestrator translates them into its runtime's flags on the \`sil run\` line; \`sil run\` applies them and, where the runtime reports it, verifies what the subagent actually received. How strongly a runtime enforces them differs and is printed on the first line of every run.
 5. **What comes back.** Only the values named by \`{{<…}}\`, as JSON. The subagent's reasoning and other output stay in the run record under \`.sil/run/\`.
 
@@ -92,13 +97,14 @@ const migrationDoc = () => `# Moving this project's documents to the silmari not
 
 Moving an existing document to the notation means putting the flow where the parser can read it. Adding a few headings or one \`{{ }}\` is not a migration. Follow these rules for every document that calls other agents.
 
-1. **One agent, one file.** An agent defined as a section inside an orchestrator (\`### 1. Analyst — role, tools, model …\`) becomes its own md file with its role and steps. The orchestrator keeps only the call, and the same paragraph names the tools and model in a sentence: \`Use the tools {{+read}} and {{+edit}}, and the model {{#fast}}.\` No frontmatter is needed.
+0. **Back up first.** Run \`sil backup\` before changing anything. It copies every md file to a folder under \`.sil/backups/\` and prints the folder; tell the user where it is. If the project is a git repository with uncommitted changes, commit first as well.
+1. **One agent, one file.** An agent defined as a section inside an orchestrator (\`### 1. Analyst — role, tools, model …\`) becomes its own md file with its role and steps. The orchestrator keeps only the call, and the same paragraph names the tools and model in a sentence: \`Use the tools {{+read}} and {{+edit}}, and the model {{#fast}}.\` A step that must judge by its own document alone, without the project start files, adds \`{{-without the project rules}}\` to that sentence. No frontmatter is needed.
 2. **The contract lives in the called file.** Turn its input/output bullets into lists under \`## {{>Inputs}}\` and \`## {{<Outputs}}\` there, one name per item, with \`(path)\` or \`(json)\` where the kind matters. Do not add these headings to the caller.
-3. **One call, one line.** Each step of the orchestrator is a numbered heading with a link to the called file and the values on that line: \`[Analyst](agents/analyst.md) with {{>posting}} and receive {{<analysis}}\`. A step that must run isolated ends its heading with \`((use a subagent via sil run))\`. A loop or retry is a heading that states its condition and its bound (\`## 5. If validation fails (up to 2 times)\`) with the call below it. Parallel work is a heading that says "for each".
-4. **Link every file the agent reads.** A split-out agent document links the rule documents it needs (\`Follow the [coding rules](../RULES.md)\`) and every other file it opens: md, json, log alike. Subagents receive files only through such links; a file name in backticks is not a link. When the file depends on a value, put the value in the target: \`[the reference](../references/{{>topic}}.md)\`.
+3. **One call, one line.** Each step of the orchestrator is a numbered heading with a link to the called file and the values on that line: \`[Analyst](agents/analyst.md) with {{>posting}} and receive {{<analysis}}\`. A step that must run isolated ends its heading with \`((use a subagent via sil run))\`. A loop or retry is a heading that states its condition and its bound (\`## 5. If validation fails (up to 2 times)\`) with the call below it. Parallel work is a heading that says "for each". A step that runs a script or a CLI instead of an agent is a \`## {{=…}}\` heading whose first link is what runs; the shell commands stay in an ordinary code block below it.
+4. **Link every file the agent reads or writes.** A split-out agent document links the rule documents it needs (\`Follow the [coding rules](../RULES.md)\`) and every other file it opens: md, json, log alike. Subagents receive files only through such links; a file name in backticks is not a link. When the file depends on a value, put the value in the target: \`[the reference](../references/{{>topic}}.md)\`. A file the step writes is a link with the value on it, \`[the report](out/report.md) stores {{>report}}\`; a file it reads back from disk is \`[the report](out/report.md) as {{<report}}\`. The path may not exist until the step has run: the graph shows it as a planned file, not a broken link.
 5. **Diagrams, pseudocode and transfer tables stay, but do not count.** The parser cannot read mermaid, a while loop, or a "data passed between agents" table. Copy what they say onto the call lines; leave the originals for people.
 6. **Value names are one word.** Letters, digits, \`_\`, \`-\`. No spaces, no symbols: \`{{>slug}}\`, not \`{{>company slug}}\`. Use the same name at the sender, the receiver, and in the contract. Words inside \`{{+…}}\`, \`{{#…}}\` and \`(( ))\` are free.
-7. **Values attach only to calls.** A link to a rules or reference document carries no \`{{ }}\`.
+7. **Values attach to calls and to file links, never to reference documents.** \`{{>…}}\` / \`{{<…}}\` after a link to an md document is a call; after a link to any other file it is a write or an import. A link to a rules or reference md carries no \`{{ }}\`.
 8. **Prose stays prose.** Background, rationale, error handling, examples: leave them as they are. The notation appears only on lines with calls and on contract headings.
 9. **Finish with \`sil lint\`.** Repeat until it reports error 0 and the last line shows task and call counts above 0. Warnings that remain should be real mismatches, not notation mistakes.
 10. **Then remove the question.** When lint is at error 0, delete this file (\`.sil/migration.md\`) and the line that starts with "When starting work, if this project's md files do not yet follow" from CLAUDE.md, AGENTS.md, GEMINI.md and .github/copilot-instructions.md, and tell the user you did. silmari never removes them; otherwise the question comes back every session.
@@ -164,7 +170,7 @@ function linkAgentFiles(root: string, lang: string) {
   const skip = new Set([ENTRY_MAIN, ...AGENT_FILES])
   const hasDocs = [...loadDir(root).keys()].some((rel) => !skip.has(rel))
   const what = `${ENTRY_MAIN} call${lang !== 'en' ? ` · language ${lang}` : ''}${hasDocs ? ' · migration prompt' : ''}`
-  if (hasDocs) writeMigrationDoc(root)
+  if (hasDocs) { backupBefore(root, 'migration'); writeMigrationDoc(root) }
   for (const f of AGENT_FILES) {
     const lines = [CALL(f), ...(lang !== 'en' ? [LANG_LINE(lang)] : []), ...(hasDocs ? [MIGRATE] : [])]
     const p = resolve(root, f)
@@ -205,12 +211,15 @@ export function init(dir: string, opt: { entry?: string; lang?: string } = {}): 
 }
 
 const writeMigrationDoc = (root: string) => { mkdirSync(resolve(root, '.sil'), { recursive: true }); writeFileSync(resolve(root, MIGRATION_PATH), migrationDoc()); process.stdout.write(`Created: ${MIGRATION_PATH}\n`) }
+/** Before an agent is asked to change documents, a copy of them. The agent takes another right before editing (rule 0), in case files changed since */
+const backupBefore = (root: string, kind: string) => { const r = backupDocs(root, kind); process.stdout.write(`Backup: ${r.dir} (${r.files} md files, in case the ${kind} has to be undone)\n`) }
 const hasLine = (p: string, prefix: string) => existsSync(p) && readFileSync(p, 'utf8').split('\n').some((l) => l.startsWith(prefix))
 
 /** sil migrate. Writes .sil/migration.md again and puts the question line back into the start files that lack it, for a migration run later. */
 export function migrate(dir: string): number {
   const root = findProjectRoot(resolve(dir))
   if (!root) { process.stderr.write(`sil migrate: no .sil/ found above ${resolve(dir)}. Run sil init first.\n`); return 1 }
+  backupBefore(root, 'migration')
   writeMigrationDoc(root)
   for (const f of AGENT_FILES) {
     const p = resolve(root, f)
@@ -293,6 +302,7 @@ export function update(dir: string): number {
   // Notes for the versions between the recorded one and this one
   const pending = Object.keys(UPDATE_NOTES).filter((v) => compareVersions(v, from) > 0 && compareVersions(v, installed) <= 0).sort(compareVersions)
   if (pending.length) {
+    backupBefore(root, 'update')
     mkdirSync(resolve(root, UPDATES_DIR), { recursive: true })
     for (const v of pending) { writeFileSync(resolve(root, UPDATES_DIR, `${v}.md`), UPDATE_NOTES[v]); process.stdout.write(`Created: ${UPDATES_DIR}/${v}.md\n`); changed++ }
     let carried = false
