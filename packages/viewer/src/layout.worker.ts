@@ -10,6 +10,6 @@ let g: Graph | null = null
 self.onmessage = (ev: MessageEvent<WorkerIn>) => {
   const m = ev.data
   if (m.type === 'graph') { g = typeof m.graph === 'string' ? (JSON.parse(m.graph) as Graph) : m.graph; return }
-  const placed: Placed = g ? layout(g, m.visible, m.open, m.sizes, m.pinned, m.opts) : { nodes: new Map(), labels: new Map(), cycles: new Set(), sameCol: new Set() }
+  const placed: Placed = g ? layout(g, m.visible, m.open, m.sizes, m.pinned, m.opts) : { nodes: new Map(), labels: new Map(), returnRoutes: new Map(), readRoutes: new Map(), right: new Map(), cycles: new Set(), sameCol: new Set() }
   postMessage({ type: 'placed', id: m.id, placed } satisfies WorkerOut)
 }

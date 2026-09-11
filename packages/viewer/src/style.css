@@ -17,10 +17,11 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 .nd .id { font-size: 11px; opacity: .75; white-space: normal; word-break: break-word }
 .nd.doc, .nd.file, .nd.ghost { border-radius: 28px; text-align: center }
 .nd.file { border-style: dotted; border-color: #94a3b8 }
+.nd.file.planned { background: transparent !important; border-color: #94a3b8; border-style: solid }
 .nd.ghost { border-style: dashed; border-color: #fca5a5; background: #7f1d1d !important }
 .nd.iso { border-color: #a78bfa; border-width: 3px }
 .nd.sel { border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.25) }
-.nd.hot { border-color: rgba(255,255,255,.75) } .sec.hot { border-color: rgba(255,255,255,.6) }
+.nd.hot { border-color: rgba(255,255,255,.75) }
 .react-flow__handle { opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0 }
 
 .el { position: absolute; background: #0f172a; box-shadow: 0 0 0 3px #0f172a, 0 2px 8px rgba(0,0,0,.5); border: 1px solid #334155; border-radius: 6px; padding: 2px 7px; font-size: 10.5px; color: #cbd5e1; white-space: nowrap; text-align: center }
@@ -33,6 +34,8 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 .sub { color: #94a3b8; font-size: 12px }
 .badge { display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 4px; margin-left: 6px; background: #475569; color: #fff; vertical-align: middle }
 .badge.live { background: #059669 } .badge.bad { background: #dc2626 } .badge.iso { background: #7c3aed } .badge.norules { background: #b45309 }
+.badge.run { background: #0f766e; color: #ccfbf1 }
+.badge.planned { background: #475569; margin-left: 5px }
 .f { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; user-select: none }
 .f:hover { background: #334155 } .f code { color: #64748b }
 .dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0 }
@@ -65,7 +68,7 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 .detailbtn { float: right; font: 11px -apple-system, "Apple SD Gothic Neo", sans-serif; background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 3px 9px; cursor: pointer }
 .detailbtn:hover { background: #1d4ed8 }
 .sec { position: relative; background: #1e293b; border: 2px solid #334155; border-radius: 8px; padding: 5px 10px; box-sizing: border-box; color: #e2e8f0; box-shadow: 0 2px 6px rgba(0,0,0,.35); cursor: pointer; overflow: hidden }
-.sec.l1 { border-color: #475569 } .sec.iso { border-color: #a78bfa } .sec.sel { border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.25) }
+.sec.l1 { border-color: #475569 } .sec.iso { border-color: #a78bfa } .sec.hot { border-color: rgba(255,255,255,.6) } .sec.sel { border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.25) }
 .sec .t { font-weight: 600; font-size: 12px; line-height: 17px; word-break: break-word; display: flex; flex-wrap: wrap; align-items: center; gap: 5px }
 .sec .t .ln { font-weight: 400; font-size: 11px }
 .sec .t .badge, .sec .t .calls { margin: 0; line-height: 15px }
@@ -84,11 +87,12 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 .resetbtn:hover { color: #e2e8f0 }
 .legend { position: absolute; left: 12px; bottom: 44px; z-index: 5; font-size: 11px; color: #cbd5e1; background: rgba(15,23,42,.85); border: 1px solid #334155; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px }
 .legend > div { display: flex; align-items: center; gap: 7px }
-.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px } .legend i.isoi { background: transparent; border: 2px solid #a78bfa; border-radius: 3px } .legend i.nri { background: #b45309 }
+.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px } .legend i.isoi { background: transparent; border: 2px solid #a78bfa; border-radius: 3px }
 .el .row { line-height: 18px; flex-wrap: wrap; gap: 4px }
 .el .row .tag { margin-right: 2px }
 .el .chip { display: inline-block; padding: 0 6px; border-radius: 4px; background: #1e293b; border: 1px solid #475569; color: #e2e8f0; font-size: 10.5px; line-height: 16px }
 .el .chip.send { border-color: #3b82f6 } .el .chip.ret { border-color: #d97706 }
+.el.write .chip.send, .el.read .chip.ret { border-color: #2dd4bf }
 /* The call's model and tools: solid chips under the subagent badge, told apart by colour only */
 .el .lr { display: grid; grid-template-columns: max-content 1fr; column-gap: 6px; row-gap: 4px; align-items: center; margin: -1px -2px 4px; padding-bottom: 4px; border-bottom: 1px solid #334155 }
 .el .lrow { display: contents }
@@ -114,9 +118,16 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 
 /* 간선 라벨 — 머리(조건 · 서브에이전트) / 몸(태그 + 칩) / 발(앵커) */
 .el { text-align: left; padding: 5px 8px }
-.el .lt { color: #94a3b8; font-size: 10px; line-height: 16px; white-space: normal; word-break: break-word; max-width: 260px; margin: 0 -2px 3px; padding-bottom: 2px; border-bottom: 1px solid #1e293b }
+.el .edgeflag { margin: -5px -8px 4px; padding: 2px 8px; border-radius: 5px 5px 0 0; font-size: 10px; font-weight: 700; line-height: 16px }
+.el .edgeflag.norules { background: #b45309; color: #fff }
+.el .lt { display: flex; align-items: center; gap: 4px; color: #94a3b8; font-size: 10px; line-height: 16px; white-space: normal; word-break: break-word; max-width: 260px; margin: 0 -2px 3px; padding-bottom: 2px; border-bottom: 1px solid #1e293b }
+.el .lt > span:first-child { min-width: 0; flex: 1 }
+.el .lt .lfrom { color: #64748b } .el .lt .lto { color: #cbd5e1 }
+.el .labelreset { flex: 0 0 auto; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #94a3b8; cursor: pointer; font-size: 12px; line-height: 16px }
+.el .labelreset:hover { background: #334155; color: #e2e8f0 }
 .el .lh { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -1px -2px 4px; padding-bottom: 3px; border-bottom: 1px solid #334155 }
 .el .lhx { color: #c4b5fd; font-size: 10.5px; font-weight: 600; white-space: normal; word-break: break-word; max-width: 240px }
+.el .lhx .arrow { color: #94a3b8; font-weight: 400; margin: 0 3px } .el .lhy { color: #a5b4fc }
 .el .lh .badge { margin: 0 }
 /* One grid for all rows: the tag column is as wide as the widest tag ("→ receive" is longer than "→ 보냄"), so tags never run into the
    chips and the chips of both rows line up */
@@ -125,6 +136,7 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 .el .row .tag { width: auto; margin: 0; text-align: left; white-space: nowrap }
 .el .chips { display: flex; flex-wrap: wrap; gap: 4px }
 .el .la { padding: 2px 0 3px; font-size: 10.5px; font-weight: 600 } .el .la.anchor { color: #34d399 }
+.el .la.write, .el .la.read { color: #2dd4bf }
 .el .lh + .la { margin-top: -2px }
 .el .la + .lb, .el .lh + .lb { border-top: 1px solid #334155; padding-top: 3px; margin-top: 2px }
 .editbtn { font: 11px -apple-system, "Apple SD Gothic Neo", sans-serif; background: #2563eb; color: #fff; border: 0; border-radius: 5px; padding: 2px 8px; cursor: pointer } .editbtn:disabled { opacity: .4; cursor: default } .editbtn.ghost { background: #334155 }
@@ -154,6 +166,16 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 .detailbtn.save { background: #059669; margin-right: 6px } .detailbtn.ghost { background: #334155; margin-right: 6px }
 .bodyedit.dirty { border-color: #f59e0b }
 .more { text-align: center; padding: 8px; font-size: 12px }
+.runsteps { display: flex; flex-direction: column; gap: 8px; margin-top: 10px }
+.runstep { padding: 8px 9px; border: 1px solid #0f766e; border-radius: 7px; background: #0b1220 }
+.runstep code { display: block; margin-top: 3px; color: #ccfbf1; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word }
+.runnum { display: inline-block; min-width: 28px; margin-right: 6px; color: #5eead4; font-weight: 700 }
+.runio { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; color: #94a3b8; font-size: 11px }
+.runsteps { margin-top: 10px; display: flex; flex-direction: column; gap: 7px }
+.runstep { background: #0b1220; border: 1px solid #0f766e; border-radius: 7px; padding: 7px 8px }
+.runstep code { display: block; margin-top: 3px; white-space: pre-wrap; overflow-wrap: anywhere; color: #ccfbf1 }
+.runnum { color: #5eead4; font-weight: 700; margin-right: 6px }
+.runio { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; color: #94a3b8 }
 /* subtree fold buttons: same shape as the ▾ button, in the same row */
 .nd .tg.fold { letter-spacing: -2px; padding-right: 2px }
 /* right panel sections fold under their heading */

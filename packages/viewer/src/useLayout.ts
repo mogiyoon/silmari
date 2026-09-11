@@ -13,7 +13,7 @@ export interface LayoutInput { visible: Set<string>; open: Set<string>; sizes: M
 export type WorkerIn = { type: 'graph'; graph: Graph | string } | ({ type: 'layout'; id: number } & LayoutInput)
 export type WorkerOut = { type: 'placed'; id: number; placed: Placed }
 
-const EMPTY: Placed = { nodes: new Map(), labels: new Map(), cycles: new Set(), sameCol: new Set() }
+const EMPTY: Placed = { nodes: new Map(), labels: new Map(), returnRoutes: new Map(), readRoutes: new Map(), right: new Map(), cycles: new Set(), sameCol: new Set() }
 const NONE = new Set<string>()
 type Shown = { placed: Placed; visible: Set<string> }
 

@@ -3,11 +3,12 @@
 // normal DOM components (labels, expansion, editing) take over. Everything is drawn from two vertex buffers rebuilt only when
 // the node set or positions change. With `view` given, the layer follows React Flow's viewport and takes no input itself.
 import { useEffect, useRef, useState } from 'react'
+import { routePoints, labelRoute, plainRoute, sameColRoute, returnRoute, readRoute, dropRoute, RT_Y } from './route.ts'
 
 export interface GLNode { id: string; x: number; y: number; w: number; h: number; color: string; title: string; border: string; bw: number; r: number }
-/** An edge in the same shape the DOM draws it: two cubic curves through the label point (lx, ly), an arrowhead at the target.
- *  tRight: the target handle is on the right side (same column) */
-export interface GLEdge { from: string; to: string; color: string; dashed: boolean; lx: number; ly: number; tRight?: boolean }
+/** An edge in the same shape the DOM draws it: right angles with rounded corners through the label point (lx, ly), or one bend
+ *  when there is no label, an arrowhead at the target. tRight: the target handle is on the right side (same column) */
+export interface GLEdge { from: string; to: string; color: string; dashed: boolean; lx?: number; ly?: number; returnRoute?: { outX: number; inX: number; y: number; r: number }; readRoute?: { outX: number; y: number; drop?: boolean }; tRight?: boolean; s1?: number; t1?: number /* strip x beside the source / target column */; dim?: boolean /* set when a heading box is selected: only its own edges stay lit */ }
 
 // Vertex: position in graph space, an offset vector, its kind, color, then the rectangle it belongs to (width, height, corner radius) and
 // the position inside it (0..1). Kind 0 = line: the unit normal times u_hw screen pixels, so lines keep one width at every zoom.
@@ -36,8 +37,8 @@ function program(gl: WebGLRenderingContext) {
 
 const cubic = (p0: number, p1: number, p2: number, p3: number, t: number) => { const mt = 1 - t; return mt * mt * mt * p0 + 3 * mt * mt * t * p1 + 3 * mt * t * t * p2 + t * t * t * p3 }
 
-/** Builds the vertex data: node rectangles, and edges as thin quads along the same path the DOM uses (two cubics through the label
- *  point), dashed by walking the arc length, with a closed arrowhead at the target. Positions are graph coordinates */
+/** Builds the vertex data: node rectangles, and edges as thin quads along the same path the DOM uses (a rounded right-angle route
+ *  through the label point), dashed by walking the arc length, with a closed arrowhead at the target. Positions are graph coordinates */
 function build(nodes: GLNode[], edges: GLEdge[], hide?: Set<string>, focus?: Set<string> | null) {
   const byId = new Map(nodes.map((n) => [n.id, n]))
   // tri: rectangles and arrowheads. lin: solid lines. dash: dashed lines as pieces. flat: the same dashed lines drawn solid and paler,
@@ -62,21 +63,25 @@ function build(nodes: GLNode[], edges: GLEdge[], hide?: Set<string>, focus?: Set
   }
   for (const e of edges) {
     const a = byId.get(e.from), b = byId.get(e.to); if (!a || !b) continue
-    const [r, g, bl] = hex(e.color), c = [r, g, bl, focus && !(focus.has(e.from) && focus.has(e.to)) ? 0.1 : EDGE_ALPHA]
-    const sx = a.x + a.w, sy = a.y + a.h / 2, tx = e.tRight ? b.x + b.w : b.x, ty = b.y + b.h / 2
-    const m1 = (sx + e.lx) / 2, m2 = (e.lx + tx) / 2
+    const [r, g, bl] = hex(e.color), c = [r, g, bl, focus && (e.dim ?? !(focus.has(e.from) && focus.has(e.to))) ? 0.1 : EDGE_ALPHA]
+    // imports enter the reader's top center; same-column links its right side below the middle; everything else its left side
+    const drop = !!e.readRoute?.drop // a hosted file leaves from its bottom center
+    const sx = drop ? a.x + a.w / 2 : a.x + a.w, sy = drop ? a.y + a.h : a.y + a.h / 2, tx = e.readRoute ? b.x + b.w / 2 : e.tRight ? b.x + b.w : b.x, ty = e.readRoute ? b.y : b.y + b.h * (e.tRight ? RT_Y : 0.5)
     // Sample each cubic finely enough for its length: a long, nearly vertical reference line drawn with a dozen segments shows its
     // corners as a wobble once dashes and neighbours overlap
     const segs = (ax: number, ay: number, bx: number, by: number) => Math.min(96, Math.max(SEG, Math.ceil(Math.hypot(bx - ax, by - ay) / 12)))
-    const pts: number[] = [sx, sy]
+    let pts: number[]
+    if (drop) pts = routePoints(dropRoute(sx, sy, tx, ty, e.lx ?? tx, e.ly ?? ty))
+    else if (e.readRoute) pts = routePoints(readRoute(sx, sy, tx, ty, e.readRoute, e.lx ?? tx, e.ly ?? ty))
+    else if (e.returnRoute) pts = routePoints(returnRoute(sx, sy, tx, ty, e.returnRoute), e.returnRoute.r)
+    else if (e.tRight) pts = routePoints(sameColRoute(sx, sy, tx, ty, e.lx ?? sx + 20, e.s1, e.t1))
+    else if (e.lx === undefined || e.ly === undefined) pts = routePoints(plainRoute(sx, sy, tx, ty, e.s1))
     // Go through the label point only when it lies between the two ends. For a line that runs back or far up/down (a reference to a
     // document elsewhere) the DOM's detour to the label is hidden under the label box; here there is no box, and the detour would show
     // as a hook at every node. Those lines take one plain curve instead
-    if (e.lx > Math.min(sx, tx) && e.lx < Math.max(sx, tx)) {
-      const n1 = segs(sx, sy, e.lx, e.ly), n2 = segs(e.lx, e.ly, tx, ty)
-      for (let i = 1; i <= n1; i++) pts.push(cubic(sx, m1, m1, e.lx, i / n1), cubic(sy, sy, e.ly, e.ly, i / n1))
-      for (let i = 1; i <= n2; i++) pts.push(cubic(e.lx, m2, m2, tx, i / n2), cubic(e.ly, e.ly, ty, ty, i / n2))
-    } else {
+    else if (e.lx > Math.min(sx, tx) && e.lx < Math.max(sx, tx)) pts = routePoints(labelRoute(sx, sy, tx, ty, e.lx, e.ly, e.s1))
+    else {
+      pts = [sx, sy]
       const d = Math.max(40, Math.abs(tx - sx) / 4), n = segs(sx, sy, tx, ty)
       for (let i = 1; i <= n; i++) pts.push(cubic(sx, sx + d, tx - d, tx, i / n), cubic(sy, sy, ty, ty, i / n))
     }
