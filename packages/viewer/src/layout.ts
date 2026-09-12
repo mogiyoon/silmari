@@ -254,19 +254,26 @@ function layoutOne(g: Graph, ids: string[], open: Set<string>, sizes: Map<number
   const colW = Array.from({ length: cols }, () => 0)
   for (const id of core) colW[rank.get(id)!] = Math.max(colW[rank.get(id)!], size(id).w)
   const gapW = Array.from({ length: cols }, () => 0) // gapW[r] = between columns r and r+1
+  // A call between two nodes of one column (siblings) loops out on the right and back in. Its label gets a lane of its own between
+  // the column and the lane of the column's child labels: the loop's vertical run passes through it there, and never under a child
+  // label. sibW[r] = the widest such label in column r; 0 when the column has none, then no room is taken
+  const sibW = Array.from({ length: cols }, () => 0)
   const labelOf = new Map<number, { w: number; h: number }>()
   for (const { e, i } of edges) {
     const b = boxOf(i); if (!b.h) continue
     labelOf.set(i, b)
     if (e.type === 'read') continue // import labels stack above the reader (below), not in a lane
-    const lo = Math.min(rank.get(e.from)!, rank.get(e.to)!), hi = Math.max(rank.get(e.from)!, rank.get(e.to)!)
-    const gi = lo // For one-column edges, use the gap to that column's right (hi === lo)
-    void hi
-    gapW[gi] = Math.max(gapW[gi], b.w)
+    const lo = Math.min(rank.get(e.from)!, rank.get(e.to)!)
+    if (sameCol.has(i)) sibW[lo] = Math.max(sibW[lo], b.w)
+    else gapW[lo] = Math.max(gapW[lo], b.w)
   }
-  const colX: number[] = []
+  const colX: number[] = [], laneX: number[] = [] // laneX[r] = where the child-label lane of column r starts
   let x = MARGIN + origin.x
-  for (let r = 0; r < cols; r++) { colX[r] = x; x += colW[r] + RANK_MARGIN + (gapW[r] ? gapW[r] + RANK_MARGIN : RANK_MARGIN) }
+  for (let r = 0; r < cols; r++) {
+    colX[r] = x; x += colW[r] + RANK_MARGIN + (sibW[r] ? sibW[r] + RANK_MARGIN : 0)
+    laneX[r] = x; x += gapW[r] ? gapW[r] + RANK_MARGIN : (sibW[r] ? 0 : RANK_MARGIN)
+  }
+  const sibX = (r: number) => colX[r] + colW[r] + RANK_MARGIN + sibW[r] / 2
 
   // 3. Vertical layout: a parent sits at the vertical center of the block its children occupy, and the children keep call order.
   //    A with a1..a4 forms one rectangle (A centered on the left, a1..a4 top-down on the right); B with b1..b3 forms the next one below.
@@ -351,7 +358,7 @@ function layoutOne(g: Graph, ids: string[], open: Set<string>, sizes: Map<number
   // the right. Returned output is labeled on its lane below, not here
   const at = (id: string) => pinned[id] ?? nodes.get(id)!
   const center = (id: string) => { const p = at(id), s = size(id); return { x: p.x + s.w / 2, y: p.y + s.h / 2 } }
-  const want: { i: number; x: number; y: number; b: { w: number; h: number }; fixed: boolean }[] = []
+  const want: { i: number; x: number; y: number; b: { w: number; h: number }; fixed: boolean; sib: boolean }[] = []
   for (const { e, i } of edges) {
     const b = labelOf.get(i); if (!b || e.type === 'read') continue
     if (!sameCol.has(i) && rank.get(e.to)! < rank.get(e.from)!) continue
@@ -359,12 +366,13 @@ function layoutOne(g: Graph, ids: string[], open: Set<string>, sizes: Map<number
     const forward = rank.get(e.to) === rank.get(e.from)! + 1
     const moved = !!(pinned[e.from] || pinned[e.to]), slot = moved ? undefined : slotY.get(i)
     const y = slot ?? (forward ? center(e.to).y : (center(e.from).y + center(e.to).y) / 2)
-    let x = colX[lo] + colW[lo] + RANK_MARGIN + gapW[lo] / 2
+    // Sibling calls in their own lane (the loop runs down through the label); everything else in the child-label lane
+    let x = sameCol.has(i) ? sibX(lo) : laneX[lo] + gapW[lo] / 2
     if (moved) {
       const fromR = at(e.from).x + size(e.from).w, toL = at(e.to).x, toR = toL + size(e.to).w
       x = toL - fromR >= b.w + 2 * GAP ? (fromR + toL) / 2 : Math.max(fromR, toR) + RANK_MARGIN + b.w / 2
     }
-    want.push({ i, x, y, b, fixed: slot !== undefined })
+    want.push({ i, x, y, b, fixed: slot !== undefined, sib: sameCol.has(i) && !moved })
   }
   // 'flow': the parent's line order wins. A label never rises above one from an earlier line of the same document (1·2·3·4·5·6 top to
   // bottom). Only within one label lane: a reference drawn in another lane (a back reference to the caller's caller, say) cannot
@@ -387,7 +395,29 @@ function layoutOne(g: Graph, ids: string[], open: Set<string>, sizes: Map<number
     labels.set(l.i, { x: l.x, y: top + l.b.h / 2 }); put.push({ x: l.x, w: l.b.w, top, bottom: top + l.b.h })
   }
   for (const l of want) if (l.fixed) settle(l)
-  for (const l of want) if (!l.fixed) settle(l)
+  for (const l of want) if (!l.fixed && !l.sib) settle(l)
+  // Sibling labels last. Every line that leaves a node of the column for the next one crosses the sibling lane at one height (its
+  // label's, or the target's for a plain link). Those heights go in as zero-height obstacles in the sibling lane's x, where no other
+  // label ever sees them. A sibling label then takes the clear spot nearest the midpoint of its loop, above or below the lines that
+  // cross there (the loop runs the whole way between its two nodes, so either side keeps the label on it); only when the lane is
+  // full does it go below everything
+  if (want.some((l) => l.sib)) {
+    for (const { e, i } of edges) {
+      const r = rank.get(e.from)!
+      if (!sibW[r] || e.type === 'read' || rank.get(e.to) !== r + 1 || pinned[e.from] || pinned[e.to]) continue
+      const y = labels.get(i)?.y ?? center(e.to).y
+      put.push({ x: sibX(r), w: sibW[r], top: y, bottom: y })
+    }
+    for (const l of want) {
+      if (l.fixed || !l.sib) continue
+      const near = put.filter((p) => Math.abs(l.x - p.x) < (l.b.w + p.w) / 2)
+      const clear = (y: number) => near.every((p) => y + l.b.h / 2 <= p.top - GAP || y - l.b.h / 2 >= p.bottom + GAP)
+      const cands = [l.y, ...near.flatMap((p) => [p.top - GAP - l.b.h / 2, p.bottom + GAP + l.b.h / 2])].sort((a, b) => Math.abs(a - l.y) - Math.abs(b - l.y))
+      const y = cands.find(clear)
+      if (y !== undefined) l.y = y
+      settle(l) // a clear spot passes through untouched; otherwise it is pushed below the lane's contents
+    }
+  }
   // Import labels stack above the reader, centered on it, in line order top to bottom. The stack fills the row the reserve kept at
   // the top of the reader's block (a dragged reader has no block, so it stacks right above the node). Nearest the node: labels of
   // imports whose file stands elsewhere — their line comes along the row just above them, which the reserve keeps empty across

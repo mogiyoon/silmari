@@ -28,9 +28,12 @@ export function plainRoute(sx: number, sy: number, tx: number, ty: number, s1 = 
 /** Same column: both handles are on the right. The line leaves right, runs down the label strip and comes back into the target's
  *  right side. The strip stays clear of both nodes even after the label is dragged left. A link that goes up takes a strip 20px
  *  further out, so two nodes that call each other draw two parallel lines instead of one on top of the other */
-export function sameColRoute(sx: number, sy: number, tx: number, ty: number, lx: number, s1 = sx + STRIP, t1 = tx + STRIP): Pt[] {
+export function sameColRoute(sx: number, sy: number, tx: number, ty: number, lx: number, s1 = sx + STRIP, t1 = tx + STRIP, ly?: number): Pt[] {
   const x = Math.max(lx, s1, t1) + (ty < sy ? 20 : 0)
-  return [{ x: sx, y: sy }, { x, y: sy }, { x, y: ty }, { x: tx, y: ty }]
+  // The label normally sits on the vertical run. When the lane pushed it past either end (or it was dragged there), the run
+  // extends to the label and comes back, so the label is never left floating beside nothing
+  const reach = ly !== undefined && (ly < Math.min(sy, ty) || ly > Math.max(sy, ty)) ? [{ x, y: ly }] : []
+  return [{ x: sx, y: sy }, { x, y: sy }, ...reach, { x, y: ty }, { x: tx, y: ty }]
 }
 
 /** Returned output: the four-bend corridor the layout reserved (out of the source's right side, along a clear lane, into the
