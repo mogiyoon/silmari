@@ -9,8 +9,8 @@
 // Models do not know our notation. The rules must be where models read them. SILMARI.md alone scored 0/3; a plain 'read SILMARI.md before working' line in CLAUDE.md scored 4/4 (experiment 5).
 import { resolve, dirname } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
-import { ENTRY_MAIN, CONFIG_PATH, loadDir, readConfig, findProjectRoot } from '@silmari/core'
-import { silVersion, compareVersions } from './version.ts'
+import { ENTRY_MAIN, CONFIG_PATH, UPDATES_DIR, loadDir, readConfig, findProjectRoot, compareVersions } from '@silmari/core'
+import { silVersion } from './version.ts'
 import { UPDATE_NOTES } from './updates.ts'
 import { backupDocs } from './backup.ts'
 /** .sil/config.yaml. The parser drops everything after #. */
@@ -158,7 +158,6 @@ export const MIGRATE_PREFIX = "When starting work, if this project's md files do
 const MIGRATE = `${MIGRATE_PREFIX} the ${ENTRY_MAIN} notation, first ask: "Start the silmari migration?" If yes, follow ${MIGRATION_PATH} rule by rule, finish with \`sil lint\` at error 0, then delete that file and this line from every agent start file.`
 /** The line `sil update` adds when it wrote notes to .sil/updates/. The agent applies them in version order and deletes them and this line */
 export const UPDATE_PREFIX = 'When starting work, apply the update notes in'
-export const UPDATES_DIR = '.sil/updates'
 const UPDATE_LINE = `${UPDATE_PREFIX} ${UPDATES_DIR}/: first tell the user, in their language and in plain words, what each note changed (how it was written before, how it is written now), then ask: "Start the silmari update?" If yes, apply the notes in version order, finish with \`sil lint\` at error 0, then delete those files and this line from every agent start file.`
 const AGENT_HEAD = (f: string) => `# ${f.replace(/^.*\//, '').replace(/\.md$/, '')}`
 

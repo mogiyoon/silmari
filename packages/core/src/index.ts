@@ -5,3 +5,4 @@ export { buildGraph, resolve, templateRegex, type BuildOptions } from './graph.t
 export { loadDir, loadDirAsync, existsIn, globIn, findProjectRoot, ALWAYS_EXCLUDE, MIN_PARALLEL, docCache, type DocCache } from './load.ts'
 export { readConfig, parseConfig, CONFIG_PATH, ENTRY_MAIN, ENTRY_FILES, ENTRY_DIRS, isConventionalEntry, type Config } from './config.ts'
 export { writeRange, readRange, readLink, retargetLink, replaceBody, replaceBodies, WriteError, type WriteResult } from './writer.ts'
+export { projectNotes, addDiagnostics, compareVersions, UPDATES_DIR } from './notes.ts'

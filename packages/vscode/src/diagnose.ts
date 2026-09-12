@@ -1,5 +1,5 @@
 // Code independent of VS Code. Checks a document set by file. Tests cover only this file.
-import { buildGraph, parseDoc, loadDir, existsIn, globIn, readConfig, type Diagnostic, type Graph, type Doc } from '@silmari/core'
+import { buildGraph, parseDoc, loadDir, existsIn, globIn, readConfig, projectNotes, addDiagnostics, type Diagnostic, type Graph, type Doc } from '@silmari/core'
 
 export interface FileDiag { code: string; severity: Diagnostic['severity']; line: number; message: string; range?: { start: number; end: number } }
 
@@ -22,12 +22,17 @@ export function splitWhere(where: string): { rel: string; line: number | null } 
   return m ? { rel: m[1], line: Number(m[2]) } : { rel: where, line: null }
 }
 
-/** Replace only that document with the unsaved body of an open file (S12: appears while editing without saving). */
-export function graphWithOverride(root: string, exclude: string[], override?: { rel: string; text: string }): Graph {
+/**
+ * Replace only that document with the unsaved body of an open file (S12: appears while editing without saving).
+ * With `installed` (the extension's version, released in step with the CLI), the project notes `sil lint` prints come too:
+ * L-I06 on .sil/config.yaml when SILMARI.md is older than the extension, L-I07 on .sil/updates while notes wait.
+ */
+export function graphWithOverride(root: string, exclude: string[], override?: { rel: string; text: string }, installed?: string): Graph {
   const cfg = readConfig(root)
   const docs: Map<string, Doc> = loadDir(root, [...exclude, ...cfg.scan.exclude])
   if (override) docs.set(override.rel, parseDoc(override.rel, override.text))
-  return buildGraph(docs, { exists: existsIn(root), glob: globIn(root), entry: cfg.entry })
+  const graph = buildGraph(docs, { exists: existsIn(root), glob: globIn(root), entry: cfg.entry })
+  return installed ? addDiagnostics(graph, projectNotes(root, installed, cfg)) : graph
 }
 
 export function byFile(g: Graph): Map<string, FileDiag[]> {
