@@ -26,3 +26,17 @@ test('toLineCol: Korean byte offset → line and column', async () => {
   const ds = [{ code: 'L-N01', severity: 'error' as const, line: 1, message: '' }, { code: 'L-N09', severity: 'error' as const, line: 1, message: '' }, { code: 'L-N13', severity: 'error' as const, line: 1, message: '' }]
   assert.deepEqual(yieldToVscode(ds, { fileLinks: true, fragmentLinks: false }).map((d) => d.code), ['L-N09', 'L-N13'])
 })
+
+test('with an installed version, the project notes sil lint prints land on .sil/config.yaml and .sil/updates', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const d = mkdtempSync(join(tmpdir(), 'sil-vscode-'))
+  mkdirSync(join(d, '.sil/updates'), { recursive: true })
+  writeFileSync(join(d, 'SILMARI.md'), '# a\n'); writeFileSync(join(d, '.sil/config.yaml'), 'version: 0.5.0\n'); writeFileSync(join(d, '.sil/updates/0.6.0.md'), 'x')
+  assert.ok(!byFile(graphWithOverride(d, ['node_modules'])).has('.sil/config.yaml'), 'without a version the extension does not judge')
+  const by = byFile(graphWithOverride(d, ['node_modules'], undefined, '0.6.0'))
+  assert.deepEqual(by.get('.sil/config.yaml')?.map((x) => [x.code, x.severity, x.line]), [['L-I06', 'info', 1]])
+  assert.deepEqual(by.get('.sil/updates')?.map((x) => x.code), ['L-I07'])
+  rmSync(d, { recursive: true })
+})

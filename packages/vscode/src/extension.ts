@@ -9,6 +9,8 @@ const EXCLUDE = ['node_modules', '.sil', '.git']
 let collection: vscode.DiagnosticCollection
 let panel: vscode.WebviewPanel | undefined
 let timer: ReturnType<typeof setTimeout> | undefined
+/** The extension's own version stands in for the installed silmari: cli and vscode are released together */
+let installed = '0.0.0'
 
 const SEV = { error: vscode.DiagnosticSeverity.Error, warning: vscode.DiagnosticSeverity.Warning, info: vscode.DiagnosticSeverity.Information } as const
 
@@ -41,7 +43,7 @@ function refresh(active?: vscode.TextDocument) {
   const override = active && active.languageId === 'markdown' && !active.uri.fsPath.includes(`${sep}node_modules${sep}`)
     ? { rel: rel(root, active.uri), text: active.getText() } : undefined
   let graph
-  try { graph = graphWithOverride(root, EXCLUDE, override) }
+  try { graph = graphWithOverride(root, EXCLUDE, override, installed) }
   catch (e) { console.error('silmari', e); return }
 
   // When built-in VS Code link validation is active through configurationDefaults, let it handle missing files and anchors in open files.
@@ -95,8 +97,12 @@ function openGraph(context: vscode.ExtensionContext) {
 
 export function activate(context: vscode.ExtensionContext) {
   collection = vscode.languages.createDiagnosticCollection('silmari')
+  installed = (context.extension.packageJSON as { version?: string }).version ?? installed
+  // `sil update` and the agent write and delete these outside the editor: the version line and the update notes (L-I06 · L-I07)
+  const sil = vscode.workspace.createFileSystemWatcher('**/.sil/{config.yaml,updates/*.md}')
   context.subscriptions.push(
-    collection,
+    collection, sil,
+    sil.onDidCreate(() => schedule()), sil.onDidChange(() => schedule()), sil.onDidDelete(() => schedule()),
     vscode.commands.registerCommand('silmari.view', () => openGraph(context)),
     vscode.commands.registerCommand('silmari.lint', () => refresh(vscode.window.activeTextEditor?.document)),
     vscode.workspace.onDidChangeTextDocument((e) => { if (e.document.languageId === 'markdown') schedule(e.document) }),
