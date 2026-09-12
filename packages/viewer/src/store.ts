@@ -4,7 +4,7 @@
 //    (where sil init ran). Do not create files in other repositories. Server mode uses PUT /layout. The extension saves in webviews. Snapshots cannot save
 // When loading, the file takes priority over localStorage.
 /** Layout algorithm version. When it changes, discard old node and label positions that conflict with the new layout */
-export const LAYOUT_V = 5
+export const LAYOUT_V = 6
 export interface Saved {
   v?: number; nodes: Record<string, { x: number; y: number }>; labels: Record<string, { dx: number; dy: number }>; open: string[]
   collapsed?: string[] // subtrees folded by the user; absent = automatic (every flow starts folded below the first level)

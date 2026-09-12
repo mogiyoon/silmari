@@ -149,7 +149,7 @@ function SilEdgeView({ id, sourceX, sourceY, targetX, targetY, targetPosition, d
     ? readPath(sourceX, sourceY, targetX, targetY, readRoute, lx, ly)
     : returnRoute
     ? returnPath(sourceX, sourceY, targetX, targetY, { ...returnRoute, y: returnRoute.y + drag.dy })
-    : targetPosition === Position.Right ? sameColRoute(sourceX, sourceY, targetX, targetY, label ? lx : sourceX + STRIP, s1, t1)
+    : targetPosition === Position.Right ? sameColRoute(sourceX, sourceY, targetX, targetY, label ? lx : sourceX + STRIP, s1, t1, label ? ly : undefined)
     : !label ? plainRoute(sourceX, sourceY, targetX, targetY, s1)
     : labelRoute(sourceX, sourceY, targetX, targetY, lx, ly, s1), returnRoute?.r ?? CORNER_R)
   return (

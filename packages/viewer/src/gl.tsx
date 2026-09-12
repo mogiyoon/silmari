@@ -74,7 +74,7 @@ function build(nodes: GLNode[], edges: GLEdge[], hide?: Set<string>, focus?: Set
     if (drop) pts = routePoints(dropRoute(sx, sy, tx, ty, e.lx ?? tx, e.ly ?? ty))
     else if (e.readRoute) pts = routePoints(readRoute(sx, sy, tx, ty, e.readRoute, e.lx ?? tx, e.ly ?? ty))
     else if (e.returnRoute) pts = routePoints(returnRoute(sx, sy, tx, ty, e.returnRoute), e.returnRoute.r)
-    else if (e.tRight) pts = routePoints(sameColRoute(sx, sy, tx, ty, e.lx ?? sx + 20, e.s1, e.t1))
+    else if (e.tRight) pts = routePoints(sameColRoute(sx, sy, tx, ty, e.lx ?? sx + 20, e.s1, e.t1, e.ly))
     else if (e.lx === undefined || e.ly === undefined) pts = routePoints(plainRoute(sx, sy, tx, ty, e.s1))
     // Go through the label point only when it lies between the two ends. For a line that runs back or far up/down (a reference to a
     // document elsewhere) the DOM's detour to the label is hidden under the label box; here there is no box, and the detour would show

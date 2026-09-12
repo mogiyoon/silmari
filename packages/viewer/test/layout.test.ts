@@ -246,9 +246,16 @@ test('layout: the first caller keeps the child at its label even when another ca
   assert.ok(idx('plan.md', 'structure.md') < idx('research.md', 'structure.md'))
   assert.ok(Math.abs(labels.get(idx('research.md', 'structure.md'))!.y - center('structure.md')) < 1, 'research → structure at structure')
   assert.ok(labels.get(idx('plan.md', 'structure.md'))!.y > center('structure.md'), 'plan → structure below it')
-  // implement ↔ review share the lane with review → review-criteria; their labels go below, the first call stays straight
+  // implement ↔ review are sibling calls: their labels take a lane of their own between the column and review → review-criteria's
+  // lane, so the first call stays straight and the loop's vertical run (at the sibling label's x) never passes under a child label
   assert.ok(Math.abs(labels.get(idx('review.md', 'review-criteria.md'))!.y - center('review-criteria.md')) < 1, 'review → review-criteria at review-criteria')
-  assert.ok(labels.get(idx('implement.md', 'review.md'))!.y > center('review-criteria.md'))
+  const sib = labels.get(idx('implement.md', 'review.md'))!, kid = labels.get(idx('review.md', 'review-criteria.md'))!
+  const kidBox = labelBox(g.edges[idx('review.md', 'review-criteria.md')]), sibBox = labelBox(g.edges[idx('implement.md', 'review.md')])
+  assert.ok(sib.x + sibBox.w / 2 < kid.x - kidBox.w / 2, `sibling label lane is left of the child-label lane: ${sib.x} vs ${kid.x}`)
+  assert.ok(sib.x > nodes.get('review.md')!.x + SIZE.task.w, 'sibling label lane is right of the column')
+  // the sibling label sits on its loop: between the two nodes' heights
+  const lo = Math.min(center('implement.md'), center('review.md')), hi = Math.max(center('implement.md'), center('review.md'))
+  assert.ok(sib.y >= lo - sibBox.h / 2 && sib.y <= hi + sibBox.h / 2, `sibling label between its nodes: ${sib.y} in ${lo}..${hi}`)
 })
 
 test('layout: a parent sits at the vertical center of its children block, and the next parent block starts below — A/a1..a4 then B/b1..b3', async () => {
