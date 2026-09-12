@@ -159,7 +159,7 @@ function SilEdgeView({ id, sourceX, sourceY, targetX, targetY, targetPosition, d
       {!dim && lod === 'full' && (rows.length > 0 || e.isolated) && (
         <EdgeLabelRenderer>
           {/* Subagent calls use a different label box. It has a purple border and top strip. Isolation belongs to the call, so it stays on the edge (§1.5) */}
-          <div ref={elRef} className={`el ${e.type} nopan nodrag${e.isolated ? ' iso' : ''}`} onPointerDown={onPointerDown} title={t.dragToMove}
+          <div ref={elRef} className={`el ${e.type} nopan nodrag${e.isolated ? ' iso' : ''}`} data-e={idx} onPointerDown={onPointerDown} title={t.dragToMove}
                style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`, pointerEvents: 'all', cursor: 'grab' }}>
             {/* Top: show the target md. The label identifies it without tracing the line */}
             {e.noRules && <div className="edgeflag norules" title={t.noRulesOf(e.noRules)}>{t.noRules}</div>}
@@ -226,6 +226,12 @@ const CELL_W = 240, CELL_H = 84
  *  the edges that leave that window */
 const GL_THRESHOLD = 2000
 const DOM_SHOW_W = 70, DOM_SHOW = DOM_SHOW_W / SIZE.task.w, WIN_PAD = 1, WIN_CAP = 400, GL_MIN_ZOOM = 0.02 // 70px = zoom 0.35
+/** Printing: at most this many nodes mounted for a print; the margin around the picture on the page; A4 with an 8 mm page margin
+ *  leaves 281 × 194 mm, a little under that in px so rounding never spills a tile onto a blank page */
+const PRINT_MAX = 3000, PRINT_PAD = 24, PAGE_MARGIN_MM = 8, PAGE_LONG = 1056, PAGE_SHORT = 728
+/** What to print: the whole picture or the selected node with everything below it; fitted on one A4 page, or at real size across
+ *  as many A4 pages as it takes */
+type PrintJob = { scope: 'all' | 'sub'; pages: 'fit' | 'tile'; root: string | null; stage: 'prep' | 'go' }
 type Rect = { x0: number; y0: number; x1: number; y1: number; z: number }
 
 /** The WebGL layer inside React Flow. It follows the viewport and never takes input, so panning and zooming stay React Flow's */
@@ -326,6 +332,12 @@ function Inner() {
   // Label order next to a parent's children: 'children' (each label at its child) or 'flow' (the parent's line order). Remembered per browser
   const [labelOrder, setLabelOrder] = useState<LabelOrder>(() => { try { return localStorage.getItem('silmari:labelOrder') === 'flow' ? 'flow' : 'children' } catch { return 'children' } })
   const [glOk, setGlOk] = useState(true) // false once the browser could not create a WebGL context; then everything stays DOM
+  // Print. 'prep' mounts every node (no culling, no WebGL layer, full detail, no selection fade) and waits for labels and layout to
+  // settle; 'go' measures what is drawn, copies the React Flow viewport into A4-sized tiles on a print-only sheet, and prints. The
+  // screen never moves: the sheet is hidden on screen and the app is hidden on paper
+  const [printing, setPrinting] = useState<PrintJob | null>(null)
+  const [printMenu, setPrintMenu] = useState(false)
+  const sheetRef = useRef<HTMLDivElement>(null)
   const toggleOrder = () => setLabelOrder((m) => { const n = m === 'flow' ? 'children' : 'flow'; try { localStorage.setItem('silmari:labelOrder', n) } catch { /* */ } return n })
   const toggleSide = () => setSideOpen((v) => { try { localStorage.setItem('silmari:side', v ? 'closed' : 'open') } catch { /* */ } return !v })
   const editable = mode === 'poll' // Editing needs a server. --out snapshots and webviews are read-only
@@ -438,7 +450,7 @@ function Inner() {
   // everything drawn below uses it, so while the worker computes a new picture the old one stays whole instead of half-moving
   const layoutInput = useMemo(() => ({ visible, open, sizes: measured, pinned: saved.nodes, opts: { labelOrder, heights: nodeH } }), [visible, open, measured, saved.nodes, labelOrder, nodeH])
   const { placed, visible: shown, pending: laying } = useLayout(graph, graphText, layoutInput, flowMode !== 'map')
-  const useGL = flowMode !== 'map' && glOk && shown.size > GL_THRESHOLD
+  const useGL = flowMode !== 'map' && glOk && shown.size > GL_THRESHOLD && !printing
   // Folding re-lays out the flow (a parent sits centered on its children), so the clicked node would jump. Remember where it was and,
   // once the new layout is in, move the viewport by the same amount so that node stays under the cursor
   const anchor = useRef<{ id: string; x: number; y: number } | null>(null)
@@ -458,7 +470,7 @@ function Inner() {
   const [fitWanted, setFitWanted] = useState(false)
   // Re-renders only when the zoom crosses the threshold (the selector returns a boolean)
   // In hybrid mode the DOM window is hidden until DOM_SHOW anyway, so it always renders in full: labels get measured while out of sight
-  const lod: 'full' | 'low' = useStore((s) => s.transform[2] < LOD_ZOOM) && !useGL ? 'low' : 'full'
+  const lod: 'full' | 'low' = useStore((s) => s.transform[2] < LOD_ZOOM) && !useGL && !printing ? 'low' : 'full'
   // Hybrid mode: the DOM window. From the first frame, keep a rectangle half a screen larger than the viewport and rebuild it only
   // when the viewport leaves it, so panning does not rebuild the node list every frame
   const domShow = useStore((s) => s.transform[2] >= DOM_SHOW)
@@ -547,6 +559,81 @@ function Inner() {
   const nodesInitialized = useNodesInitialized()
   // Fit only when React Flow has measured the nodes. Earlier calls are ignored because unmeasured nodes have no bounds
   useEffect(() => { if (fitWanted && nodesInitialized) { setFitWanted(false); fitView({ padding: 0.15, duration: 200 }) } }, [fitWanted, nodesInitialized, fitView])
+  // Printing, stage 1: everything mounts in the DOM, so a flow past this size is refused rather than freezing the browser
+  const print = (scope: PrintJob['scope'], pages: PrintJob['pages']) => {
+    setPrintMenu(false)
+    if (printing) return
+    if (shown.size > PRINT_MAX) { setToast({ kind: 'warn', text: t.printTooBig(shown.size) }); setTimeout(() => setToast(null), 5000); return }
+    setPrinting({ scope, pages, root: scope === 'sub' ? sel : null, stage: 'prep' })
+  }
+  const printMenuRef = useRef(() => {}); printMenuRef.current = () => { if (!printing) setPrintMenu((v) => !v) }
+  // ⌘P / Ctrl+P opens the print menu instead of printing the screen; Escape closes it
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if ((ev.metaKey || ev.ctrlKey) && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === 'p') { ev.preventDefault(); printMenuRef.current() }
+      else if (ev.key === 'Escape') setPrintMenu(false)
+    }
+    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  // Stage 1 → 2: once every node is measured and the layout has been quiet for a moment
+  useEffect(() => {
+    if (printing?.stage !== 'prep' || laying || !nodesInitialized) return
+    const id = window.setTimeout(() => setPrinting((p) => (p ? { ...p, stage: 'go' } : p)), 300)
+    return () => window.clearTimeout(id)
+  }, [printing, laying, nodesInitialized, rfNodes, placed])
+  // Stage 2. The subtree scope keeps the root node, every node below it in the call tree (as folded or unfolded on screen), and the
+  // edges and labels between them. What is drawn is measured in flow coordinates; the picture is that box plus a margin. Fit: scaled
+  // down (never up) onto one A4 page. Tiles: real size, cut into A4 pages left to right and top to bottom, each numbered. The page
+  // stands portrait when the picture is taller than wide. Each tile holds a copy of the React Flow viewport (a static snapshot of
+  // the nodes, edges, arrowheads, and labels) shifted so that its part of the picture shows. Then print, and clear the sheet once
+  // the dialog closes (afterprint, or a moment after print() returns in browsers that never fire it)
+  useEffect(() => {
+    if (printing?.stage !== 'go' || !graph) return
+    const sheet = sheetRef.current, { transform: [tx, ty, z], domNode } = rfStore.getState(), pane = domNode?.getBoundingClientRect()
+    if (!sheet || !domNode || !pane) { setPrinting(null); return }
+    let keep: Set<string> | null = null
+    if (printing.scope === 'sub' && printing.root) { keep = new Set<string>(); const walk = (id: string) => { if (!shown.has(id) || keep!.has(id)) return; keep!.add(id); for (const k of kidsOf.get(id) ?? []) walk(k) }; walk(printing.root) }
+    const keepNode = (el: Element) => !keep || keep.has(((el as HTMLElement).dataset.id ?? '').split('::')[0])
+    const keepEdge = (eid: string | undefined) => { if (!keep) return true; const e = graph.edges[Number((eid ?? '').slice(1))]; return !!e && keep.has(e.from) && keep.has(e.to) }
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    const add = (el: Element) => { const r = el.getBoundingClientRect(); if (!r.width && !r.height) return; x0 = Math.min(x0, (r.left - pane.left - tx) / z); y0 = Math.min(y0, (r.top - pane.top - ty) / z); x1 = Math.max(x1, (r.right - pane.left - tx) / z); y1 = Math.max(y1, (r.bottom - pane.top - ty) / z) }
+    for (const el of domNode.querySelectorAll<HTMLElement>('.react-flow__node')) if (keepNode(el)) add(el)
+    for (const el of domNode.querySelectorAll<HTMLElement>('.el')) if (keepEdge(`e${el.dataset.e}`)) add(el)
+    for (const el of domNode.querySelectorAll<HTMLElement>('.react-flow__edge')) if (keepEdge(el.dataset.id)) add(el.querySelector('.react-flow__edge-path') ?? el)
+    const src = domNode.querySelector<HTMLElement>('.react-flow__viewport')
+    if (x0 === Infinity || !src) { setPrinting(null); return }
+    const bw = x1 - x0, bh = y1 - y0, portrait = bh > bw
+    const pw = portrait ? PAGE_SHORT : PAGE_LONG, ph = portrait ? PAGE_LONG : PAGE_SHORT
+    const zoom = printing.pages === 'fit' ? Math.min(1, (pw - 2 * PRINT_PAD) / bw, (ph - 2 * PRINT_PAD) / bh) : 1
+    const W = bw * zoom + 2 * PRINT_PAD, H = bh * zoom + 2 * PRINT_PAD
+    const cols = Math.max(1, Math.ceil(W / pw)), rows = Math.max(1, Math.ceil(H / ph))
+    // one snapshot without the viewport's own transform and without what the scope leaves out; a copy per tile
+    const proto = src.cloneNode(true) as HTMLElement
+    proto.style.transform = 'none'
+    for (const el of proto.querySelectorAll<HTMLElement>('.react-flow__node')) if (!keepNode(el)) el.remove()
+    for (const el of proto.querySelectorAll<HTMLElement>('.react-flow__edge')) if (!keepEdge(el.dataset.id)) el.remove()
+    for (const el of proto.querySelectorAll<HTMLElement>('.el')) if (!keepEdge(`e${el.dataset.e}`)) el.remove()
+    sheet.replaceChildren()
+    const style = document.createElement('style')
+    style.textContent = `@page { size: A4 ${portrait ? 'portrait' : 'landscape'}; margin: ${PAGE_MARGIN_MM}mm }`
+    sheet.append(style)
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const tile = document.createElement('div'); tile.className = 'ptile'; tile.style.width = `${pw}px`; tile.style.height = `${ph}px`
+      const view = document.createElement('div'); view.className = 'ppane'
+      view.style.width = `${Math.max(0, x1) + PRINT_PAD}px`; view.style.height = `${Math.max(0, y1) + PRINT_PAD}px`
+      view.style.transform = `translate(${PRINT_PAD - x0 * zoom - c * pw}px, ${PRINT_PAD - y0 * zoom - r * ph}px) scale(${zoom})`
+      view.append(r === rows - 1 && c === cols - 1 ? proto : proto.cloneNode(true))
+      tile.append(view)
+      if (rows * cols > 1) { const num = document.createElement('div'); num.className = 'pnum'; num.textContent = t.printPage(r + 1, rows, c + 1, cols); tile.append(num) }
+      sheet.append(tile)
+    }
+    sheet.classList.add('on')
+    let fallback: number | undefined
+    const done = () => { window.clearTimeout(fallback); sheet.classList.remove('on'); sheet.replaceChildren(); setPrinting(null) }
+    window.addEventListener('afterprint', done)
+    const raf = requestAnimationFrame(() => requestAnimationFrame(() => { window.print(); fallback = window.setTimeout(done, 1000) }))
+    return () => { window.removeEventListener('afterprint', done); cancelAnimationFrame(raf); window.clearTimeout(fallback) }
+  }, [printing]) // eslint-disable-line react-hooks/exhaustive-deps
   const nb = useMemo(() => {
     const m = new Map<string, Set<string>>()
     for (const e of graph?.edges ?? []) { (m.get(e.from) ?? m.set(e.from, new Set()).get(e.from)!).add(e.to); (m.get(e.to) ?? m.set(e.to, new Set()).get(e.to)!).add(e.from) }
@@ -613,13 +700,14 @@ function Inner() {
 
   // Hover: the node under the cursor, its neighbors and its lines get brighter. Nothing dims, so a cursor left on a node after a zoom changes little.
   // Over a heading box: that box, its document, and only what that heading's edges reach
-  const hi = hovHead && hovEdges && graph ? new Set([hovHead.doc, ...[...hovEdges].flatMap((i) => [graph.edges[i].from, graph.edges[i].to])]) : hov ? new Set([hov, ...(nb.get(hov) ?? [])]) : null
+  const hi = printing ? null : hovHead && hovEdges && graph ? new Set([hovHead.doc, ...[...hovEdges].flatMap((i) => [graph.edges[i].from, graph.edges[i].to])]) : hov ? new Set([hov, ...(nb.get(hov) ?? [])]) : null
   // Selection: the selected node and its neighbors stay, everything else fades. A click is deliberate, so this cannot be tripped by zooming; a click on empty space clears it.
   // A selected heading box keeps only the document and what that heading's edges reach
   const focus = useMemo(() => {
+    if (printing) return null // the print shows everything at full strength
     if (headEdges && graph && selHead) { const s = new Set([selHead.doc]); for (const i of headEdges) { const e = graph.edges[i]; s.add(e.from); s.add(e.to) } return s }
     return sel ? new Set([sel, ...(nb.get(sel) ?? [])]) : null
-  }, [sel, nb, headEdges, graph, selHead])
+  }, [sel, nb, headEdges, graph, selHead, printing])
   const nodes = rfNodes.map((x) => x.type === 'cell' ? x : x.type === 'sec'
     ? { ...x, data: { ...(x as SN).data, hot: !!hi && hi.has((x as SN).data.doc) && !(hovHead && hovHead.doc === (x as SN).data.doc && hovHead.line !== (x as SN).data.h.line), dim: !!focus && !focus.has((x as SN).data.doc), sel: selHead?.doc === (x as SN).data.doc && selHead.line === (x as SN).data.h.line } } as SN
     : { ...x, data: { ...(x as RN).data, hot: !!hi && hi.has(x.id), dim: !!focus && !focus.has(x.id), selected: sel === x.id } } as RN)
@@ -645,7 +733,8 @@ function Inner() {
   if (!graph) return <Loading phase={phase} error={error} />
 
   return (
-    <div className="app">
+    <>
+    <div className={`app${printing ? ' printing' : ''}`}>
       <div className="canvas" onWheelCapture={(ev) => { wheelAt.current = { x: ev.clientX, y: ev.clientY } }}
            onDoubleClick={(ev) => {
              // Far view: a double click on a rectangle the layer drew folds or unfolds that subtree (DOM nodes handle their own double click)
@@ -653,7 +742,7 @@ function Inner() {
              const { transform: [tx, ty, zoom], domNode } = rfStore.getState(); const r = domNode?.getBoundingClientRect(); if (!r) return
              const n = glHit(glNodes, { tx, ty, zoom }, ev.clientX - r.left, ev.clientY - r.top)
              if (n && !layerHide?.has(n.id) && kidsOf.has(n.id)) fold(n.id) }}>
-        {laying && <div className="busy" role="status"><span className="spin" />{t.laying}</div>}
+        {(laying || printing) && <div className="busy" role="status"><span className="spin" />{printing ? t.printing : t.laying}</div>}
         <LodCtx.Provider value={lod}>
         <ReactFlow className={useGL && !domShow ? 'domhide' : undefined} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange}
                    onNodeClick={(_, x) => { if (x.type === 'cell') { setView({ cell: (x as CN).data.key }); return } if (x.type === 'sec') { const d = (x as SN).data; setSel(d.doc); setSelHead({ doc: d.doc, line: d.h.line }) } else { setSel(x.id); setSelHead(null) } }}
@@ -667,7 +756,7 @@ function Inner() {
                    // Highlight only on real pointer movement. After a wheel zoom the browser fires a mouse move at the same spot by itself
                    onNodeMouseMove={(ev, x) => { if (ev.clientX === wheelAt.current.x && ev.clientY === wheelAt.current.y) return; setHov(x.type === 'sec' ? (x as SN).data.doc : x.id); setHovHead(x.type === 'sec' ? { doc: (x as SN).data.doc, line: (x as SN).data.h.line } : null) }} onNodeMouseLeave={() => { setHov(null); setHovHead(null) }}
                    nodesConnectable={false} elementsSelectable={editable}
-                   elevateEdgesOnSelect={false} elevateNodesOnSelect={false} onlyRenderVisibleElements={!useGL && rfNodes.length > 300} // in hybrid mode the window is already small; culling would leave margin nodes unmeasured, and their edges undrawn
+                   elevateEdgesOnSelect={false} elevateNodesOnSelect={false} onlyRenderVisibleElements={!printing && !useGL && rfNodes.length > 300} // in hybrid mode the window is already small; culling would leave margin nodes unmeasured, and their edges undrawn. Printing needs every node in the DOM
                    minZoom={useGL ? GL_MIN_ZOOM : 0.2} maxZoom={2.5} zoomOnDoubleClick={!useGL} proOptions={{ hideAttribution: true }} colorMode="dark">
           <Background gap={24} color="#1e293b" />
           {useGL && <GLLayer nodes={glNodes} edges={layerEdges} hide={layerHide} focus={focus} selected={sel} onUnavailable={() => setGlOk(false)} />}
@@ -686,9 +775,6 @@ function Inner() {
             <button className="resetbtn" onClick={() => setView('map')}>◂ {t.viewMap}</button>
             <span className="crumb">{flowMode === 'grid' ? t.viewGrid : (() => { const c = cellList.find((x) => x.key === (flowMode as { cell: string }).cell); return c?.singles ? t.loose : (byId.get(c?.root ?? '')?.title ?? (flowMode as { cell: string }).cell) })()}</span>
           </>)}
-          {(Object.keys(saved.nodes).length > 0 || Object.keys(saved.labels).length > 0 || saved.collapsed) && (
-            <button className="resetbtn" title={t.resetTitle} onClick={() => update((s) => ({ ...s, nodes: {}, labels: {}, collapsed: undefined }))}>{t.reset}</button>
-          )}
         </div>
       </div>
       <EditCtx.Provider value={{ editable, editing, drafts, setDraft, notify: (kind, text) => { setToast({ kind, text }); setTimeout(() => setToast(null), 4000) } }}>
@@ -704,8 +790,36 @@ function Inner() {
         <button className="railbtn lang" onClick={() => setLang(lang === 'ko' ? 'en' : 'ko')} title={t.langSwitchTitle} aria-label={t.langSwitchTitle}>{t.langSwitch}</button>
         <button className={`railbtn lang${labelOrder === 'flow' ? ' on' : ''}`} onClick={toggleOrder} title={t.orderTitle(labelOrder)} aria-label={t.orderTitle(labelOrder)}>{labelOrder === 'flow' ? t.orderFlow : t.orderChildren}</button>
         {kidsOf.size > 0 && flowMode !== 'map' && flowMode !== 'entry' && <button className={`railbtn lang${collapsed.size ? ' on' : ''}`} onClick={collapsed.size ? unfoldAll : foldAll} title={collapsed.size ? t.expandAll : t.collapseAll} aria-label={collapsed.size ? t.expandAll : t.collapseAll}>{collapsed.size ? '▸▸' : '◂◂'}</button>}
+        {/* Reset layout: only while there is something to forget (dragged nodes or labels, or folds the user changed) */}
+        {(Object.keys(saved.nodes).length > 0 || Object.keys(saved.labels).length > 0 || saved.collapsed) && (
+          <button className="railbtn" title={`${t.reset} — ${t.resetTitle}`} aria-label={t.reset} onClick={() => update((s) => ({ ...s, nodes: {}, labels: {}, collapsed: undefined }))}>↺</button>
+        )}
+        {/* Print: opens the menu (whole picture or the selected node's subtree; one page or A4 tiles) */}
+        <button className={`railbtn${printing || printMenu ? ' on' : ''}`} disabled={!!printing} title={`${t.print} — ${t.printTitle}`} aria-label={t.print} onClick={() => setPrintMenu((v) => !v)}>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1h8v4H4z M2 6h12a1 1 0 0 1 1 1v5h-3v3H4v-3H1V7a1 1 0 0 1 1-1z M5 11h6v3H5z" fillRule="evenodd" /></svg>
+        </button>
       </nav>
+      {printMenu && !printing && (
+        <div className="printmenu" role="menu">
+          <div className="pm-h">{t.print}</div>
+          <div className="pm-scope">{t.printAll}</div>
+          <div className="pm-row">
+            <button onClick={() => print('all', 'fit')}>{t.printFit}</button>
+            <button onClick={() => print('all', 'tile')}>{t.printTiles}</button>
+          </div>
+          <div className={`pm-scope${sel ? '' : ' muted'}`}>{sel ? t.printSub(byId.get(sel)?.title ?? sel) : t.printNoSel}</div>
+          {sel && (
+            <div className="pm-row">
+              <button onClick={() => print('sub', 'fit')}>{t.printFit}</button>
+              <button onClick={() => print('sub', 'tile')}>{t.printTiles}</button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
+    {/* The print sheet: empty and hidden on screen; on paper it is the only thing shown */}
+    <div className="printsheet" ref={sheetRef} aria-hidden="true" />
+    </>
   )
 }
 

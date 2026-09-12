@@ -189,3 +189,34 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 .seg button.on { background: #334155; color: #e2e8f0 } .seg button:hover { color: #e2e8f0 }
 .nd .outchip { margin-left: 6px; font-size: 9.5px; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.35); border-radius: 4px; padding: 0 5px; vertical-align: middle; cursor: help }
 .side .hiddendiag { padding: 6px 8px; color: #94a3b8; font-size: 12px; cursor: pointer; border-radius: 6px } .side .hiddendiag:hover { background: #334155; color: #e2e8f0 }
+/* rail: the reset and print buttons; the print icon is an inline SVG in the button's colour */
+.railbtn svg { width: 14px; height: 14px; fill: currentColor }
+.railbtn:disabled { cursor: default; opacity: .6 }
+/* Print menu: under the rail's print button */
+.printmenu { position: absolute; right: 44px; top: 8px; z-index: 30; min-width: 250px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 16px rgba(0,0,0,.5); font-size: 12px; color: #e2e8f0 }
+.printmenu .pm-h { font-weight: 600; margin-bottom: 6px }
+.printmenu .pm-scope { color: #94a3b8; font-size: 11px; margin: 6px 0 4px; overflow-wrap: anywhere }
+.printmenu .pm-row { display: flex; gap: 6px }
+.printmenu .pm-row button { flex: 1; font: 12px -apple-system, "Apple SD Gothic Neo", sans-serif; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 5px 8px; cursor: pointer }
+.printmenu .pm-row button:hover { background: #334155 }
+.app { position: relative }
+/* Print sheet: A4 tiles, each a copy of the viewport shifted to its part of the picture. Hidden on screen. On paper the app is
+   hidden instead, and colours print as drawn (node colours carry meaning), so the page is dark like the screen */
+.printsheet { display: none }
+.printsheet .ptile { position: relative; overflow: hidden; background: #0f172a; break-after: page; break-inside: avoid }
+.printsheet .ptile:last-child { break-after: auto }
+.printsheet .ppane { position: absolute; left: 0; top: 0; transform-origin: 0 0 }
+.printsheet .ppane .react-flow__viewport { position: absolute; left: 0; top: 0; width: 100%; height: 100%; transform: none }
+/* the copy lies outside the .react-flow container, so React Flow's rules scoped under it are repeated here: the edge SVGs sit at the
+   origin and draw beyond their box */
+.printsheet .react-flow__edges, .printsheet .react-flow__nodes, .printsheet .react-flow__edgelabel-renderer { position: absolute; left: 0; top: 0; width: 100%; height: 100% }
+.printsheet .react-flow__edges svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none }
+.printsheet .pnum { position: absolute; right: 6px; bottom: 3px; font-size: 9px; color: #64748b }
+@media print {
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact }
+  html, body, #root { height: auto; overflow: visible; background: #0f172a }
+  .app.printing { display: none !important }
+  .printsheet.on { display: block }
+  /* a plain print from the browser menu, without the sheet: the picture as it is on screen, without the chrome */
+  .rail, .side, .topbar, .legend, .toast, .busy, .printmenu, .react-flow__controls, .react-flow__minimap, .react-flow__background, .react-flow__attribution, .react-flow__panel { display: none !important }
+}
