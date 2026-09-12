@@ -272,28 +272,12 @@ function layoutOne(g: Graph, ids: string[], open: Set<string>, sizes: Map<number
   //    A with a1..a4 forms one rectangle (A centered on the left, a1..a4 top-down on the right); B with b1..b3 forms the next one below.
   //    The tree is the BFS parent (the caller that gave the node its column). A node called by two parents stays under the first one.
   const blockH = new Map<string, number>()
-  // A child's slot is also tall enough for the labels of the calls from its parent, so each label can sit at its child's height.
-  // In 'flow' order only the first call's label sits at the child (later calls line up below in line order), so the slot holds one label
-  // and the children are placed against the label column instead (flowSlots)
   const flow = opts.labelOrder === 'flow'
-  const labelsH = (id: string) => { const p = bfsParent.get(id); let h = -GAP; for (const { e, i } of edges) if (e.from === p && e.to === id && e.type !== 'read' && labelOf.has(i)) { h += labelOf.get(i)!.h + GAP; if (flow) break } return h }
-  // 'flow': the parent's calls are walked in line order. A first call places its child so that the call's label sits at the child's
-  // height and below every label before it; a repeat call to an earlier child only takes its slot in the label column, so the
-  // children after it move down below that label. Otherwise their labels would be pushed off their height and the lines would climb back
-  const flowSlots = (id: string): { tops: Map<string, number>; h: number } => {
-    const ks = new Set(kids.get(id) ?? []), tops = new Map<string, number>()
-    let cur = 0, lab = 0, bottom = 0
-    for (const { e, i } of edges) {
-      if (e.from !== id || !ks.has(e.to) || e.type === 'read') continue
-      const h = labelOf.get(i)?.h ?? 0
-      if (!tops.has(e.to)) {
-        const bh = blockH.get(e.to)!, center = Math.max(cur + bh / 2, h ? lab + h / 2 : 0), top = center - bh / 2
-        tops.set(e.to, top); cur = top + bh + NODESEP; bottom = Math.max(bottom, top + bh)
-        if (h) lab = center + h / 2 + GAP
-      } else if (h) { lab += h + GAP; bottom = Math.max(bottom, lab - GAP) }
-    }
-    return { tops, h: bottom }
-  }
+  // The call a child stands beside is its parent's first labeled call to it (lowest edge index, imports aside): that label sits at
+  // the child's height, so the line runs straight from the label into the child. The parent's later calls stack below it in its
+  // lane, and none of these move once placed. A call from any other node to that child goes below whatever is already in the lane
+  const callsOf = new Map<string, { e: SilEdge; i: number }[]>()
+  for (const x of edges) if (x.e.type !== 'read') (callsOf.get(x.e.from) ?? callsOf.set(x.e.from, []).get(x.e.from)!).push(x)
   // A file import (read edge) comes in from above. The reader's block keeps an empty row on top: the import labels stacked in line
   // order plus a gap above them for the line to travel along. The node and its children all start below that row
   for (const { i } of hostedReads) { const b = boxOf(i); if (b.h) labelOf.set(i, b) }
@@ -307,75 +291,103 @@ function layoutOne(g: Graph, ids: string[], open: Set<string>, sizes: Map<number
     for (const { e, i } of rs) { h += (labelOf.get(i)?.h ?? 0) + GAP; if (hostOf.get(e.from) === id) h += nodeSize(byId.get(e.from)!, false).h + GAP; else far = true }
     return h + (far ? GAP : 0)
   }
+  /** The children's slots inside a parent's block, measured from the top of the block's body (below the parent's import row).
+   *  A child is placed so that the label of the parent's first labeled call to it sits at the child's height and below every label
+   *  placed before it — the block grows instead of the label moving — and each later call takes the next place in the label lane.
+   *  'flow': the parent's calls are walked in line order, calls to nodes that are not its children included, so a repeat call to an
+   *  earlier child pushes the children after it down. 'children': child by child in discovery order, the repeat calls to a child
+   *  right under its first label */
+  const slotsOf = (id: string): { tops: Map<string, number>; labs: Map<number, number>; h: number } => {
+    const ks = kids.get(id) ?? [], kidSet = new Set(ks), tops = new Map<string, number>(), labs = new Map<number, number>()
+    let cur = 0, lab = 0, bottom = 0
+    const calls = callsOf.get(id) ?? []
+    const labeled = new Set<string>() // children with a labeled call from this parent
+    for (const c of calls) if (kidSet.has(c.e.to) && labelOf.has(c.i)) labeled.add(c.e.to)
+    const call = ({ e, i }: { e: SilEdge; i: number }) => {
+      const h = labelOf.get(i)?.h ?? 0
+      if (kidSet.has(e.to) && !tops.has(e.to)) {
+        // The child stands beside its first labeled call; a plain link before it takes no room in the lane
+        if (!h && labeled.has(e.to)) return
+        // The node sits below its own import row, centered in the rest of its block
+        const bh = blockH.get(e.to)!, off = (bh + reserve(e.to)) / 2
+        const center = Math.max(cur + off, lab + h / 2), top = center - off
+        tops.set(e.to, top); cur = top + bh + NODESEP; bottom = Math.max(bottom, top + bh, h ? center + h / 2 : 0)
+        if (h) { labs.set(i, center); lab = center + h / 2 + GAP }
+      } else if (h) { labs.set(i, lab + h / 2); lab += h + GAP; bottom = Math.max(bottom, lab - GAP) }
+    }
+    if (flow) { for (const c of calls) if (kidSet.has(c.e.to) || rank.get(c.e.to) === rank.get(id)! + 1) call(c) }
+    else {
+      const toKid = new Map<string, typeof calls>()
+      for (const c of calls) if (kidSet.has(c.e.to)) (toKid.get(c.e.to) ?? toKid.set(c.e.to, []).get(c.e.to)!).push(c)
+      for (const k of ks) for (const c of toKid.get(k) ?? []) call(c)
+    }
+    // A child reached only by an import has no call to stand beside: it follows the others
+    for (const k of ks) if (!tops.has(k)) { tops.set(k, cur); cur += blockH.get(k)! + NODESEP; bottom = Math.max(bottom, cur - NODESEP) }
+    return { tops, labs, h: bottom }
+  }
   const measure = (id: string): number => {
-    const ks = kids.get(id) ?? []
-    const kidsH = ks.reduce((a, k) => a + measure(k), 0) + Math.max(0, ks.length - 1) * NODESEP
-    const h = reserve(id) + Math.max(size(id).h, labelsH(id), kidsH, flow ? flowSlots(id).h : 0)
+    for (const k of kids.get(id) ?? []) measure(k)
+    const h = reserve(id) + Math.max(size(id).h, slotsOf(id).h)
     blockH.set(id, h); return h
   }
   const nodes = new Map<string, { x: number; y: number }>()
   const blockTop = new Map<string, number>()
+  const slotY = new Map<number, number>() // edge index → the label center its parent's slots gave it
   const place = (id: string, top: number) => {
     blockTop.set(id, top)
     const t = top + reserve(id)
     nodes.set(id, { x: colX[rank.get(id)!], y: t + (blockH.get(id)! - reserve(id) - size(id).h) / 2 })
-    if (flow) { const { tops } = flowSlots(id); for (const k of kids.get(id) ?? []) place(k, t + tops.get(k)!) }
-    else { let cur = t; for (const k of kids.get(id) ?? []) { place(k, cur); cur += blockH.get(k)! + NODESEP } }
+    const { tops, labs } = slotsOf(id)
+    for (const [i, y] of labs) slotY.set(i, t + y)
+    for (const k of kids.get(id) ?? []) place(k, t + tops.get(k)!)
   }
   let top = MARGIN + origin.y
   for (const id of sorted) if (!bfsParent.has(id)) { measure(id); place(id, top); top += blockH.get(id)! + NODESEP }
 
-  // Start labels at the gap's center x and the average center y of both nodes. Push down on overlap.
-  // Edges of dragged nodes (pinned) follow their actual positions. Center the label if it fits between the nodes. Otherwise, put it to the right.
-  // Resolve remaining overlaps with one rule. Place from the top. On horizontal overlap, push below the earlier label
+  // Labels start at the gap's center x. A label the slots placed (a parent's call into its children's block) keeps that height.
+  // Every other label starts at its target's height (a call one column to the right) or at the midpoint of both ends (same column)
+  // and moves below any label already placed in its lane that it would overlap, so a lane reads top to bottom.
+  // Edges of dragged nodes (pinned) follow their actual positions: the label is centered if it fits between the nodes, else put to
+  // the right. Returned output is labeled on its lane below, not here
   const at = (id: string) => pinned[id] ?? nodes.get(id)!
   const center = (id: string) => { const p = at(id), s = size(id); return { x: p.x + s.w / 2, y: p.y + s.h / 2 } }
-  const want: { i: number; sy: number; x: number; y: number; b: { w: number; h: number } }[] = []
+  const want: { i: number; x: number; y: number; b: { w: number; h: number }; fixed: boolean }[] = []
   for (const { e, i } of edges) {
     const b = labelOf.get(i); if (!b || e.type === 'read') continue
+    if (!sameCol.has(i) && rank.get(e.to)! < rank.get(e.from)!) continue
     const lo = Math.min(rank.get(e.from)!, rank.get(e.to)!)
-    // A label for a call one column to the right sits at the height of the node it goes to, so a parent's labels line up with its children
-    // inside the same rectangle, in call order. Other edges (same column, back edges) sit at the midpoint of both ends
     const forward = rank.get(e.to) === rank.get(e.from)! + 1
-    const y = forward ? center(e.to).y : (center(e.from).y + center(e.to).y) / 2
+    const moved = !!(pinned[e.from] || pinned[e.to]), slot = moved ? undefined : slotY.get(i)
+    const y = slot ?? (forward ? center(e.to).y : (center(e.from).y + center(e.to).y) / 2)
     let x = colX[lo] + colW[lo] + RANK_MARGIN + gapW[lo] / 2
-    if (pinned[e.from] || pinned[e.to]) {
+    if (moved) {
       const fromR = at(e.from).x + size(e.from).w, toL = at(e.to).x, toR = toL + size(e.to).w
       x = toL - fromR >= b.w + 2 * GAP ? (fromR + toL) / 2 : Math.max(fromR, toR) + RANK_MARGIN + b.w / 2
     }
-    want.push({ i, sy: center(e.from).y, x, y, b })
-  }
-  // Labels follow the child order (their target's height). Several calls from the same parent to the same child are stacked as one
-  // group centered on that child, in line order, so they stay inside the child's slot instead of pushing the next label down
-  const groups = new Map<string, typeof want>()
-  for (const l of want) { const e = g.edges[l.i]; if (rank.get(e.to) === rank.get(e.from)! + 1 && !pinned[e.from] && !pinned[e.to]) (groups.get(`${e.from}>${e.to}`) ?? groups.set(`${e.from}>${e.to}`, []).get(`${e.from}>${e.to}`)!).push(l) }
-  if (opts.labelOrder !== 'flow') for (const ls of groups.values()) {
-    if (ls.length < 2) continue
-    ls.sort((a, b) => a.i - b.i)
-    const total = ls.reduce((a, l) => a + l.b.h, 0) + (ls.length - 1) * GAP
-    let cur = ls[0].y - total / 2
-    for (const l of ls) { l.y = cur + l.b.h / 2; cur += l.b.h + GAP }
+    want.push({ i, x, y, b, fixed: slot !== undefined })
   }
   // 'flow': the parent's line order wins. A label never rises above one from an earlier line of the same document (1·2·3·4·5·6 top to
-  // bottom). Only within one label column: a reference drawn in another column (a back reference to the caller's caller, say) cannot
-  // overlap these labels, so it must not push them down either
-  if (opts.labelOrder === 'flow') {
+  // bottom). Only within one label lane: a reference drawn in another lane (a back reference to the caller's caller, say) cannot
+  // overlap these labels, so it must not push them down either. The labels the slots placed already follow the line order
+  if (flow) {
     const lastOf = new Map<string, number>()
     for (const l of [...want].sort((a, b) => a.i - b.i)) {
       const key = `${g.edges[l.i].from}@${Math.round(l.x)}`, floor = lastOf.get(key)
-      if (floor !== undefined && l.y - l.b.h / 2 < floor) l.y = floor + l.b.h / 2
+      if (!l.fixed && floor !== undefined && l.y - l.b.h / 2 < floor) l.y = floor + l.b.h / 2
       lastOf.set(key, l.y + l.b.h / 2 + GAP)
     }
   }
   want.sort((a, b) => a.y - b.y || a.i - b.i)
   const labels = new Map<number, { x: number; y: number }>()
-  const put: { x: number; w: number; bottom: number }[] = []
-  for (const l of want) {
+  const put: { x: number; w: number; top: number; bottom: number }[] = []
+  const settle = (l: (typeof want)[number]) => {
     let top = l.y - l.b.h / 2
-    for (const p of put) if (Math.abs(l.x - p.x) < (l.b.w + p.w) / 2) top = Math.max(top, p.bottom + GAP)
-    labels.set(l.i, { x: l.x, y: top + l.b.h / 2 })
-    put.push({ x: l.x, w: l.b.w, bottom: top + l.b.h })
+    // Below every placed label it would overlap, again when that lands it on another one
+    if (!l.fixed) for (let hit = true; hit;) { hit = false; for (const p of put) if (Math.abs(l.x - p.x) < (l.b.w + p.w) / 2 && top < p.bottom + GAP && top + l.b.h > p.top - GAP) { top = p.bottom + GAP; hit = true } }
+    labels.set(l.i, { x: l.x, y: top + l.b.h / 2 }); put.push({ x: l.x, w: l.b.w, top, bottom: top + l.b.h })
   }
+  for (const l of want) if (l.fixed) settle(l)
+  for (const l of want) if (!l.fixed) settle(l)
   // Import labels stack above the reader, centered on it, in line order top to bottom. The stack fills the row the reserve kept at
   // the top of the reader's block (a dragged reader has no block, so it stacks right above the node). Nearest the node: labels of
   // imports whose file stands elsewhere — their line comes along the row just above them, which the reserve keeps empty across

@@ -206,8 +206,49 @@ test('layout: a label sits at the height of the node it goes to, in child order;
   const idx = (to: string, nth = 0) => g.edges.map((e, i) => ({ e, i })).filter(({ e }) => e.from === 'flow.md' && e.to === to)[nth].i
   const center = (id: string) => nodes.get(id)!.y + SIZE.task.h / 2
   for (const to of ['research.md', 'plan.md', 'review.md', 'wrap-up.md']) assert.ok(Math.abs(labels.get(idx(to))!.y - center(to)) < 1, `label to ${to} at its height`)
-  const first = labels.get(idx('implement.md', 0))!, again = labels.get(idx('implement.md', 1))!
-  assert.ok(again.y > first.y && Math.abs((first.y + again.y) / 2 - center('implement.md')) < 1, 'the two calls to implement are one group centered on implement, first above')
+  // The first call's label sits at implement's height, so its line runs straight from the label into implement; the repeat call
+  // stacks right under it and the children after it move down instead of the labels
+  const first = labels.get(idx('implement.md', 0))!, again = labels.get(idx('implement.md', 1))!, b1 = labelBox(g.edges[idx('implement.md', 0)])
+  assert.ok(Math.abs(first.y - center('implement.md')) < 1, 'the first call to implement sits at its height')
+  assert.ok(again.y > first.y && again.y - labelBox(g.edges[idx('implement.md', 1)]).h / 2 >= first.y + b1.h / 2, 'the repeat call sits below the first')
+  assert.ok(center('review.md') > again.y, 'review moved below the repeat label')
+})
+
+// A child stands beside the label of its parent's first call, and that line never bends after the label. Nothing else in the
+// lane may take that height: not a call from another node with a lower edge index, not a same-column link's label, not the
+// parent's own repeat call. Those go below. Checked for every child in every corpus, in both label orders
+for (const [dir, root] of CORPORA) for (const labelOrder of ['children', 'flow'] as const) {
+  test(`layout: every first call's label sits at its child's height — ${dir}, ${labelOrder}`, { skip: !existsSync(root) && 'private corpus not present' }, () => {
+    const g = buildGraph(loadDir(root, [], readConfig(root).words), { exists: existsIn(root) })
+    const visible = new Set(g.nodes.map((n) => n.id))
+    const { nodes, labels } = layout(g, visible, new Set(), undefined, {}, { labelOrder })
+    const { parent } = skeleton(g, [...visible])
+    const kind = new Map(g.nodes.map((n) => [n.id, n.kind]))
+    let checked = 0
+    for (const [child, p] of parent) {
+      const i = g.edges.findIndex((e, j) => e.from === p && e.to === child && e.type !== 'read' && labels.has(j))
+      if (i < 0) continue
+      checked += 1
+      const c = nodes.get(child)!.y + SIZE[kind.get(child)!].h / 2
+      assert.ok(Math.abs(labels.get(i)!.y - c) < 1, `${p} → ${child}: label at ${labels.get(i)!.y}, child center ${c}`)
+    }
+    assert.ok(checked > 0)
+  })
+}
+
+test('layout: the first caller keeps the child at its label even when another caller has a lower edge index or a same-column label sits in the lane', async () => {
+  const root = resolve(import.meta.dirname, '../../core/test/fixtures/after')
+  const g = buildGraph(loadDir(root, [], readConfig(root).words), { exists: existsIn(root) })
+  const { nodes, labels } = layout(g, new Set(g.nodes.map((n) => n.id)))
+  const idx = (from: string, to: string) => g.edges.findIndex((e) => e.from === from && e.to === to)
+  const center = (id: string) => nodes.get(id)!.y + SIZE[g.nodes.find((n) => n.id === id)!.kind].h / 2
+  // plan.md's reference to structure.md comes first in edge order (plan < research), but research called it first
+  assert.ok(idx('plan.md', 'structure.md') < idx('research.md', 'structure.md'))
+  assert.ok(Math.abs(labels.get(idx('research.md', 'structure.md'))!.y - center('structure.md')) < 1, 'research → structure at structure')
+  assert.ok(labels.get(idx('plan.md', 'structure.md'))!.y > center('structure.md'), 'plan → structure below it')
+  // implement ↔ review share the lane with review → review-criteria; their labels go below, the first call stays straight
+  assert.ok(Math.abs(labels.get(idx('review.md', 'review-criteria.md'))!.y - center('review-criteria.md')) < 1, 'review → review-criteria at review-criteria')
+  assert.ok(labels.get(idx('implement.md', 'review.md'))!.y > center('review-criteria.md'))
 })
 
 test('layout: a parent sits at the vertical center of its children block, and the next parent block starts below — A/a1..a4 then B/b1..b3', async () => {
