@@ -1,7 +1,8 @@
 <!-- Generated from README.md at the repository root by tools/readme.mjs. Edit that file, then run: pnpm readme -->
 <p align="center"><img src="https://raw.githubusercontent.com/mogiyoon/silmari/main/assets/silmari-icon.png" width="120" alt="silmari"></p>
 
-# silmari
+<h1 align="center">silmari</h1>
+<h3 align="center">Keep your docs talking to each other.</h3>
 
 **Checks flow and data in md documents and shows them as a graph.**
 Agent md files are the source. silmari is the compiler. AI is the runtime. It is like `tsc` for the md files that drive your agents.
