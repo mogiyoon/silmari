@@ -144,6 +144,8 @@ test('Frontmatter: only the sil block is read. Other tools\' keys (name, tools, 
   assert.equal(g.nodes[0].kind, 'task')
   assert.ok(!('agent' in g.nodes[0]), 'no agent field on the node')
   assert.equal(buildGraph(new Map([['a.md', parseDoc('a.md', '---\ntools: Read\n---\n# A\n\n자료.\n')]])).nodes[0].kind, 'doc', 'tools in frontmatter do not make a task')
+  const crlf = parseDoc('a.md', '---\r\nsil:\r\n  type: task\r\n---\r\n# A\r\n\r\n자료.\r\n')
+  assert.deepEqual([crlf.fm, crlf.headings.map((h) => h.text)], [{ type: 'task' }, ['A']], 'CRLF frontmatter (a Windows checkout) is read, not parsed as a thematic break and a heading')
 })
 
 test('Contract headings are symbols at any level and in any language; the words inside become the heading text', () => {
@@ -319,6 +321,8 @@ test('Config reads entry, scan.exclude, lang and strict; words is ignored; entry
   assert.equal(parseConfig('lang: ja\n').lang, 'ja')
   assert.deepEqual(parseConfig('words:\n  inputs: [입력]\n'), { strict: false, scan: { exclude: [] }, entry: [], lang: 'en', version: null }, 'a 0.1.x words section is ignored without error')
   assert.equal(parseConfig('version: 0.3.1   # who wrote SILMARI.md\n').version, '0.3.1', 'the recorded silmari version')
+  assert.deepEqual(parseConfig('entry: [SILMARI.md]   # entry point\r\nlang: ko   # language\r\nversion: 0.7.0   # who wrote it\r\nscan:\r\n  exclude: [".sil/backups/**"]   # respected\r\nstrict: true   # exit 1\r\n'),
+    { strict: true, scan: { exclude: ['.sil/backups/**'] }, entry: ['SILMARI.md'], lang: 'ko', version: '0.7.0' }, 'a CRLF config (Windows checkout): comments are dropped as in an LF one')
   assert.ok(isConventionalEntry('SILMARI.md') && isConventionalEntry('AGENTS.md') && isConventionalEntry('.github/prompts/x.prompt.md') && !isConventionalEntry('docs/x.md'))
   const base = { 'a.md': '# A\n\n[b](b.md) 에 {{>v}} 를 넘긴다.\n', 'b.md': '# B' + TASK }
   const g = buildGraph(new Map(Object.entries({ ...base, '흐름.md': '# 흐름\n\n설명.\n', 'AGENTS.md': '# 규칙\n' }).map(([r, s]) => [r, parseDoc(r, s)])), { entry: ['흐름.md'] })

@@ -72,13 +72,14 @@ const processor = unified().use(remarkParse).use(remarkGfm)
 
 /** The only frontmatter silmari defines is the `sil:` block (`sil:\n  type: task|doc`). Every other key belongs to some other tool and is left alone. */
 function frontmatter(src: string): { fm: Record<string, string>; body: string; bodyLineOffset: number } {
-  const lines = src.split('\n')
-  if (lines[0] !== '---') return { fm: {}, body: src, bodyLineOffset: 0 }
-  const end = lines.indexOf('---', 1)
+  // The fences are matched without a trailing \r: in a CRLF file (a Windows checkout) the frontmatter was read as a thematic break and a heading
+  const lines = src.split('\n'), bare = lines.map((l) => l.replace(/\r$/, ''))
+  if (bare[0] !== '---') return { fm: {}, body: src, bodyLineOffset: 0 }
+  const end = bare.indexOf('---', 1)
   if (end < 0) return { fm: {}, body: src, bodyLineOffset: 0 }
   const fm: Record<string, string> = {}
   let inSil = false
-  for (const ln of lines.slice(1, end)) {
+  for (const ln of bare.slice(1, end)) {
     if (/^sil:\s*$/.test(ln)) { inSil = true; continue }
     const m = inSil && /^\s{2}(\w+):\s*(.*?)\s*$/.exec(ln)
     if (m) { fm[m[1]] = m[2]; continue }

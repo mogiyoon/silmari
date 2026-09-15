@@ -236,7 +236,7 @@ test('run: checks the call line before anything starts — (( )) label, --send n
   const r = (...a: string[]) => spawnSync(process.execPath, ['--experimental-strip-types', MAIN, 'run', ...a], { encoding: 'utf8', cwd: d })
   const ok = ['claude', '--step', 'flow.md#1', '--send', 'marker=marker.txt', '--send', 'prefs={"a":1}', '--model', 'haiku', '--tools', 'Read']
   const dry = r(...ok, '--dry-run')
-  assert.equal(dry.status, 0); assert.equal(dry.stdout.trim(), 'claude -p "<prompt>" --output-format stream-json --verbose --model haiku --tools Read', 'no {{-…}} on the call line: the project start files reach the subagent, as people expect')
+  assert.equal(dry.status, 0); assert.equal(dry.stdout.trim(), 'claude -p --output-format stream-json --verbose --model haiku --tools Read < <prompt>','no {{-…}} on the call line: the project start files reach the subagent, as people expect')
   const p = r(...ok, '--prompt-only').stdout
   assert.match(p, /^This session runs one step of a flow as a subagent[\s\S]*the project rules you were started with still apply/, 'the prompt says the start files still apply'); assert.match(p, /## Values for this run\n- marker:\nmarker\.txt\n- prefs:\n\{"a":1\}/); assert.match(p, /keys are: report/)
   const refused = (args: string[], re: RegExp) => { const x = r(...args); assert.equal(x.status, 1, args.join(' ')); assert.match(x.stderr, re) }
@@ -253,13 +253,13 @@ test('run: checks the call line before anything starts — (( )) label, --send n
   refused(['claude', '--step', 'flow.md#9', '--send', 'x=1'], /no heading numbered 9/)
   const help = r('--help'); assert.equal(help.status, 0); assert.match(help.stdout, /sil run claude --step flow\.md#1/); assert.match(help.stdout, /enforcement: os-sandbox/)
   const codex = r('codex', ...ok.slice(1, 7), '-m', 'gpt-5.4-mini', '-s', 'read-only', '--dry-run')
-  assert.equal(codex.stdout.trim(), 'codex exec --json --skip-git-repo-check "<prompt>" -m gpt-5.4-mini -s read-only')
+  assert.equal(codex.stdout.trim(), 'codex exec --json --skip-git-repo-check - -m gpt-5.4-mini -s read-only < <prompt>')
   // {{-…}} on the call line: sil adds the runtime's own switch for its project start files, and says so in the prompt
   const cut = ['--step', 'flow.md#3', '--send', 'marker=marker.txt', '--send', 'prefs={"a":1}']
   assert.equal(r('claude', ...cut, '--model', 'haiku', '--tools', 'Read', '--dry-run').stdout.trim(),
-    'claude -p "<prompt>" --output-format stream-json --verbose --setting-sources user --model haiku --tools Read')
+    'claude -p --output-format stream-json --verbose --setting-sources user --model haiku --tools Read < <prompt>')
   assert.equal(r('codex', ...cut, '-m', 'gpt-5.4-mini', '-s', 'read-only', '--dry-run').stdout.trim(),
-    'codex exec --json --skip-git-repo-check -c project_doc_max_bytes=0 "<prompt>" -m gpt-5.4-mini -s read-only')
+    'codex exec --json --skip-git-repo-check -c project_doc_max_bytes=0 - -m gpt-5.4-mini -s read-only < <prompt>')
   assert.match(r('claude', ...cut, '--model', 'haiku', '--tools', 'Read', '--prompt-only').stdout,
     /^This session runs one isolated step of a flow\. The project start files are switched off for it/, 'the prompt tells the subagent it is on its own')
   rmSync(d, { recursive: true, force: true })
@@ -286,6 +286,82 @@ test('run: the subagent starts in the project root — links in the called docum
   const bad = r('--send', 'topic=nope', '--send', 'spec=../docs/spec.json', '--prompt-only')
   assert.equal(bad.status, 1); assert.match(bad.stderr, /links \.\.\/references\/\{\{>topic\}\}\.md, which becomes flows\/references\/nope\.md with the values sent, but no file exists there/)
   rmSync(d, { recursive: true, force: true })
+})
+
+test('run: starts the runtime found on PATH with the prompt on stdin, decodes UTF-8 across chunks, caches only a clean run, and misses the cache when a pointed-at file changes', { skip: process.platform === 'win32' && 'the fake runtime is a POSIX script' }, async () => {
+  const { delimiter } = await import('node:path')
+  const d = resolve(tmpdir(), `sil-run-fake-${process.pid}`); rmSync(d, { recursive: true, force: true })
+  for (const sub of ['.sil', 'agents', 'bin']) mkdirSync(resolve(d, sub), { recursive: true })
+  writeFileSync(resolve(d, 'flow.md'), '# Flow\n\n## 1. Check ((use a subagent via sil run))\nCall [Checker](agents/checker.md) with {{>spec}} and receive {{<report}}. Use {{+read}} on {{#fast}}.\n')
+  // The called document is a CRLF checkout with frontmatter
+  writeFileSync(resolve(d, 'agents/checker.md'), '---\r\nsil:\r\n  type: task\r\n---\r\n# Checker\r\n\r\nRead [the rules](../rules.md).\r\n\r\n## {{>Inputs}}\r\n- spec (path) — the file\r\n\r\n## {{<Outputs}}\r\n- report\r\n')
+  writeFileSync(resolve(d, 'rules.md'), '# Rules\n'); writeFileSync(resolve(d, 'spec.txt'), 'v1\n')
+  // A fake claude: --version exits 0; a run records its arguments and stdin, then streams its events one byte per write, so a multi-byte
+  // character is split between chunks. FAKE_MODE=error ends with an error result that carries no text, and exit code 1
+  writeFileSync(resolve(d, 'bin/claude'), `#!${process.execPath}
+const fs = require('node:fs')
+if (process.argv[2] === '--version') { console.log('0.0.0 (fake)'); process.exit(0) }
+let input = ''
+process.stdin.setEncoding('utf8').on('data', (c) => { input += c }).on('end', async () => {
+  fs.writeFileSync('.sil/fake-call.json', JSON.stringify({ args: process.argv.slice(2), stdin: input }))
+  const error = process.env.FAKE_MODE === 'error'
+  const events = [{ type: 'system', subtype: 'init', tools: ['Read'] }, { type: 'assistant', message: { model: 'fake-haiku', content: [] } },
+    error ? { type: 'result', subtype: 'error_max_turns', is_error: true } : { type: 'result', subtype: 'success', is_error: false, result: '{"report": "한글 보고서 ✓"}' }]
+  for (const b of Buffer.from(events.map((e) => JSON.stringify(e)).join('\\n') + '\\n')) { process.stdout.write(Buffer.from([b])); await new Promise((r) => setTimeout(r, 0)) }
+  process.exitCode = error ? 1 : 0
+})
+`, { mode: 0o755 })
+  const sil = (mode: string) => spawnSync(process.execPath, ['--experimental-strip-types', MAIN, 'run', 'claude', '--step', 'flow.md#1', '--send', 'spec=spec.txt', '--model', 'haiku', '--tools', 'Read'],
+    { encoding: 'utf8', cwd: d, env: { ...process.env, PATH: `${resolve(d, 'bin')}${delimiter}${process.env.PATH}`, FAKE_MODE: mode } })
+  try {
+    const failed = sil('error')
+    assert.equal(failed.status, 1, failed.stderr)
+    assert.match(failed.stderr, /claude reported an error \(error_max_turns\)\. Not cached; record \.sil\/run\//)
+    const call = JSON.parse(readFileSync(resolve(d, '.sil/fake-call.json'), 'utf8')) as { args: string[]; stdin: string }
+    assert.deepEqual(call.args, ['-p', '--output-format', 'stream-json', '--verbose', '--model', 'haiku', '--tools', 'Read'], 'the prompt is not on the command line')
+    assert.match(call.stdin, /^This session runs one step of a flow[\s\S]*\n# Checker\n\nRead \[the rules\]\(rules\.md\)\.\n[\s\S]*- spec:\nspec\.txt\n/, 'the prompt arrives on stdin')
+    assert.doesNotMatch(call.stdin, /sil:|type: task|\r/, 'the CRLF frontmatter does not leak into the prompt, and the body is LF')
+    const ok = sil('ok')
+    assert.equal(ok.status, 0, ok.stderr)
+    assert.deepEqual(JSON.parse(ok.stdout), { report: '한글 보고서 ✓' }, 'characters split across chunks are decoded whole')
+    assert.match(ok.stderr, /ran as fake-haiku · tools given \[Read\]/)
+    const cached = sil('error')
+    assert.equal(cached.status, 0, 'the failed run left no cache entry; the clean one did, so the failing fake does not run'); assert.match(cached.stderr, /cached from .*; nothing ran/)
+    writeFileSync(resolve(d, 'spec.txt'), 'v2\n')
+    assert.equal(sil('error').status, 1, 'the (path) file changed: the cache misses and the runtime runs')
+    writeFileSync(resolve(d, 'spec.txt'), 'v1\n')
+    assert.equal(sil('error').status, 0, 'the content that was cached is back: a hit again')
+    writeFileSync(resolve(d, 'rules.md'), '# Rules\n\nOne more rule.\n')
+    assert.equal(sil('error').status, 1, 'a linked document changed: the cache misses')
+  } finally { rmSync(d, { recursive: true, force: true }) }
+})
+
+test('update and migrate on CRLF files (a Windows checkout): a current project stays unchanged, endings stay CRLF, an appended line starts on its own line', () => {
+  const d = resolve(tmpdir(), `sil-crlf-${process.pid}`); rmSync(d, { recursive: true, force: true }); mkdirSync(d)
+  writeFileSync(resolve(d, 'flow.md'), '# Flow\n\nWork.\n')
+  run('init', d, '--lang=ko')
+  const onlyCRLF = (f: string) => !/(^|[^\r])\n/.test(readFileSync(resolve(d, f), 'utf8'))
+  for (const f of ['SILMARI.md', 'CLAUDE.md', '.sil/config.yaml']) writeFileSync(resolve(d, f), readFileSync(resolve(d, f), 'utf8').replace(/\n/g, '\r\n'))
+  // The migration question as an older sil wrote it
+  writeFileSync(resolve(d, 'CLAUDE.md'), readFileSync(resolve(d, 'CLAUDE.md'), 'utf8').replace(/When starting work, if this project's md files do not yet follow[^\r]*/, "When starting work, if this project's md files do not yet follow the SILMARI.md notation, ask the old way."))
+  const first = run('update', d).stdout
+  assert.match(first, /Updated: CLAUDE\.md \(migration line points at \.sil\/migration\.md\)/)
+  assert.doesNotMatch(first, /Updated: SILMARI\.md|Recorded:/, 'a current CRLF entry document is not rewritten, and the CRLF config is read with its version')
+  for (const f of ['SILMARI.md', 'CLAUDE.md', '.sil/config.yaml']) assert.ok(onlyCRLF(f), `${f} keeps CRLF only`)
+  assert.match(run('update', d).stdout, /Unchanged: SILMARI\.md\nUp to date: \d+\.\d+\.\d+\n$/)
+  writeFileSync(resolve(d, 'AGENTS.md'), '# Codex\r\nno newline at the end')
+  run('migrate', d)
+  assert.match(readFileSync(resolve(d, 'AGENTS.md'), 'utf8'), /^# Codex\r\nno newline at the end\r\nWhen starting work, if this project's md files do not yet follow[^\r\n]*\r\n$/)
+  rmSync(d, { recursive: true, force: true })
+})
+
+test('pickLang: --lang first, then LC_ALL and LANG; C and POSIX name no language, so the system locale decides, as on Windows where LANG is unset', async () => {
+  const { pickLang } = await import('../src/init.ts')
+  assert.equal(pickLang('ko', { LANG: 'ja_JP.UTF-8' }), 'ko')
+  assert.equal(pickLang(undefined, { LC_ALL: 'de_DE.UTF-8', LANG: 'ja_JP.UTF-8' }), 'de')
+  assert.equal(pickLang(undefined, { LANG: 'ko_KR.UTF-8' }), 'ko')
+  const system = /^([a-z]{2,3})/i.exec(Intl.DateTimeFormat().resolvedOptions().locale)?.[1].toLowerCase() ?? 'en'
+  for (const env of [{ LANG: 'C.UTF-8' }, { LANG: 'POSIX' }, {}]) assert.equal(pickLang(undefined, env), system, JSON.stringify(env))
 })
 
 test('README.md for npm is generated from the repository README and is current (tools/readme.mjs --check)', () => {

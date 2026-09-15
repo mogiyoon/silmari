@@ -5,7 +5,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, watch } f
 import { createHash } from 'node:crypto'
 import { gzipSync } from 'node:zlib'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { resolve, join } from 'node:path'
+import { resolve, join, sep } from 'node:path'
 import { spawn } from 'node:child_process'
 import { loadDirAsync, existsIn, globIn, buildGraph, docCache, replaceBody, replaceBodies, writeRange, WriteError } from '@silmari/core'
 import { readConfig } from './lint.ts'
@@ -71,7 +71,7 @@ export async function view(dir: string, opt: { port?: number; out?: string; open
   // fallback in case the watcher missed an event. A load with nothing changed keeps the cached JSON and ETag.
   // (The watcher keeps the process alive, so it is only started in server mode)
   let dirty = true, lastScan = 0
-  const skip = /(^|\/)(\.git|\.sil|node_modules)(\/|$)/
+  const skip = /(^|[\\/])(\.git|\.sil|node_modules)([\\/]|$)/ // the watcher reports Windows paths with backslashes
   try { watch(root, { recursive: true }, (_ev, name) => { if (!name || !skip.test(String(name))) dirty = true }) } catch { /* no recursive watch here: the 30 s fallback covers it */ }
   let building: Promise<void> | null = null
   const refresh = (): Promise<void> => {
@@ -144,7 +144,7 @@ export async function view(dir: string, opt: { port?: number; out?: string; open
       const rel = url.searchParams.get('path') ?? ''
       const abs = resolve(root, rel)
       // Any file inside the root, not only md: the side panel shows a linked json or log like an editor would. Binary and oversized files are refused
-      if (!rel || !abs.startsWith(resolve(root) + '/')) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'path must be inside the root' })); return }
+      if (!rel || !abs.startsWith(resolve(root) + sep)) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'path must be inside the root' })); return }
       if (!existsSync(abs) || statSync(abs).isDirectory()) { res.writeHead(404, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: `File not found: ${rel}` })); return }
       const buf = readFileSync(abs)
       const why = fileTextError(buf)
