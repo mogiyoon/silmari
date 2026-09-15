@@ -23,11 +23,24 @@ scan:
 strict: false          # true: exit code 1 when there is an error
 `
 
-/** The user's language as a short tag (en, ko, ja …). From --lang, else the environment (LC_ALL, LANG), else en. */
-export const pickLang = (flag?: string): string => {
-  const raw = flag || process.env.LC_ALL || process.env.LANG || 'en'
-  const m = /^([a-z]{2,3})/i.exec(raw.trim())
-  return m ? m[1].toLowerCase() : 'en'
+/** The user's language as a short tag (en, ko, ja …). From --lang, else the environment (LC_ALL, LANG), else the system locale, else en.
+ *  Windows sets no LANG, so a Korean Windows got en; Node's Intl reports the display language there. C and POSIX name no language */
+export const pickLang = (flag?: string, env: NodeJS.ProcessEnv = process.env): string => {
+  if (flag) return /^([a-z]{2,3})/i.exec(flag.trim())?.[1].toLowerCase() ?? 'en'
+  const tag = (raw?: string) => /^([a-z]{2,3})(?:[-_.@]|$)/i.exec(raw?.trim() ?? '')?.[1].toLowerCase()
+  return tag(env.LC_ALL) ?? tag(env.LANG) ?? tag(Intl.DateTimeFormat().resolvedOptions().locale) ?? 'en'
+}
+
+// Line endings. A Windows checkout (core.autocrlf) has CRLF start files and entry documents. silmari compares and edits them as LF and
+// writes them back in the ending they had: before, a CRLF line never equalled the generated one, so `sil update` rewrote it on every
+// run and left the file with mixed endings (2026-09-15)
+const eolOf = (text: string) => (text.includes('\r\n') ? '\r\n' : '\n')
+const toLF = (text: string) => text.replace(/\r\n/g, '\n')
+const writeAs = (p: string, lf: string, eol: string) => writeFileSync(p, eol === '\n' ? lf : lf.replace(/\n/g, eol))
+/** Appends lines to an existing file in its own line ending, on a line of their own even when the file does not end with a newline */
+const appendLines = (p: string, lines: string[], blankBefore = false) => {
+  const text = readFileSync(p, 'utf8'), eol = eolOf(text)
+  appendFileSync(p, (text === '' || text.endsWith('\n') ? '' : eol) + (blankBefore ? eol : '') + lines.join(eol) + eol)
 }
 
 /** Generated text is English only. When the user's language is not English, a line tells the agent to write in that language. */
@@ -70,8 +83,8 @@ Eight symbols. The words inside them are free, in any language.
    \`{{-…}}\` on the call line needs no flag of yours: \`sil run\` adds the runtime's own switch for the project start files.
 2. If the heading has no \`(( ))\` label, read the called file and follow its steps yourself. Tools and model do not apply; you keep your own.
 3. Values on the call line (\`{{>name}}\`) exist only for this run. Fill them in and pass each one with \`--send name=…\`. The hint on that name in the called document's \`{{>…}}\` list says what to send, and \`sil run\` checks it before anything starts:
-   - No hint, or \`(text)\`: the value itself. \`--send tone=formal\`, or \`--send note=@memo.md\` to send a file's content. Nothing is checked. The subagent sees the text either way and cannot tell the two apart.
-   - \`(json)\`: a JSON string, typed or from a file. \`--send options='{"depth": 2}'\` or \`--send options=@options.json\`. Refused when it does not parse.
+   - No hint, or \`(text)\`: the value itself. \`--send tone=formal\`, or \`--send note=@memo.md\` to send a file's content (an @file path is read from the folder you run sil in). Nothing is checked. The subagent sees the text either way and cannot tell the two apart.
+   - \`(json)\`: a JSON string, typed or from a file. \`--send options='{"depth": 2}'\` or \`--send options=@options.json\`. Refused when it does not parse. Windows PowerShell 5 loses the double quotes inside an argument, so send JSON from a file there.
    - \`(path)\`: the path itself, relative to the flow file's folder. \`--send spec=docs/design.md\`, never \`@\`. Refused when nothing exists there. Only the path reaches the prompt; the subagent opens it with its own tools, so the call line needs \`{{+read}}\` or wider.
    Every value lands in the prompt as it is, under \`## Values for this run\`. Send content (\`@file\`) for short values; send a \`(path)\` when the value is large or is several files, so the prompt stays small and the subagent reads only what it needs.
 4. If \`sil\` is not installed, start the subagent with your tool's own feature and apply the model and tools as far as it allows. Tool limits are then a request, not a guarantee.
@@ -180,7 +193,7 @@ function linkAgentFiles(root: string, lang: string) {
       continue
     }
     if (readFileSync(p, 'utf8').includes(ENTRY_MAIN)) { process.stdout.write(`Unchanged: ${f} (already mentions ${ENTRY_MAIN})\n`); continue }
-    appendFileSync(p, `\n${lines.join('\n')}\n`)
+    appendLines(p, lines, true)
     process.stdout.write(`Appended: ${f} (${what})\n`)
   }
 }
@@ -223,7 +236,7 @@ export function migrate(dir: string): number {
   for (const f of AGENT_FILES) {
     const p = resolve(root, f)
     if (!existsSync(p) || hasLine(p, MIGRATE_PREFIX)) continue
-    appendFileSync(p, `${MIGRATE}\n`); process.stdout.write(`Appended: ${f} (migration prompt)\n`)
+    appendLines(p, [MIGRATE]); process.stdout.write(`Appended: ${f} (migration prompt)\n`)
   }
   return 0
 }
@@ -283,10 +296,10 @@ export function update(dir: string): number {
   for (const rel of cfg.entry) {
     const p = resolve(root, rel)
     if (!existsSync(p)) continue
-    const before = readFileSync(p, 'utf8'), after = refreshEntry(before)
+    const raw = readFileSync(p, 'utf8'), before = toLF(raw), after = refreshEntry(before)
     if (after === null) { process.stdout.write(`Unchanged: ${rel} (no generated sections)\n`); continue }
     if (after === before) { process.stdout.write(`Unchanged: ${rel}\n`); continue }
-    writeFileSync(p, after); changed++; process.stdout.write(`Updated: ${rel} (Notation · Running a call · Subagents refreshed${before.includes('\n## Migration') ? ' · Migration moved to ' + MIGRATION_PATH : ''})\n`)
+    writeAs(p, after, eolOf(raw)); changed++; process.stdout.write(`Updated: ${rel} (Notation · Running a call · Subagents refreshed${before.includes('\n## Migration') ? ' · Migration moved to ' + MIGRATION_PATH : ''})\n`)
   }
   // The migration question: an old line said "the Migration section of SILMARI.md"; that section is gone, so the line points at the file
   let asking = false
@@ -294,8 +307,8 @@ export function update(dir: string): number {
     const p = resolve(root, f)
     if (!hasLine(p, MIGRATE_PREFIX)) continue
     asking = true
-    const lines = readFileSync(p, 'utf8').split('\n'), i = lines.findIndex((l) => l.startsWith(MIGRATE_PREFIX))
-    if (lines[i] !== MIGRATE) { lines[i] = MIGRATE; writeFileSync(p, lines.join('\n')); changed++; process.stdout.write(`Updated: ${f} (migration line points at ${MIGRATION_PATH})\n`) }
+    const raw = readFileSync(p, 'utf8'), lines = toLF(raw).split('\n'), i = lines.findIndex((l) => l.startsWith(MIGRATE_PREFIX))
+    if (lines[i] !== MIGRATE) { lines[i] = MIGRATE; writeAs(p, lines.join('\n'), eolOf(raw)); changed++; process.stdout.write(`Updated: ${f} (migration line points at ${MIGRATION_PATH})\n`) }
   }
   if (asking && !existsSync(resolve(root, MIGRATION_PATH))) { writeMigrationDoc(root); changed++ }
   // Notes for the versions between the recorded one and this one
@@ -310,17 +323,17 @@ export function update(dir: string): number {
       if (!existsSync(p)) continue
       carried = true
       if (hasLine(p, UPDATE_PREFIX)) continue
-      appendFileSync(p, `${UPDATE_LINE}\n`); process.stdout.write(`Appended: ${f} (update notes prompt)\n`)
+      appendLines(p, [UPDATE_LINE]); process.stdout.write(`Appended: ${f} (update notes prompt)\n`)
     }
     if (!carried) process.stdout.write(`Note: no agent start file (${AGENT_FILES.join(' · ')}) to carry the prompt. The notes wait in ${UPDATES_DIR}/ and sil lint reports them; tell your agent to apply them\n`)
   }
   // Record the version: replace the line or add it
   const cp = resolve(root, CONFIG_PATH)
-  const text = existsSync(cp) ? readFileSync(cp, 'utf8') : ''
+  const rawCfg = existsSync(cp) ? readFileSync(cp, 'utf8') : '', text = toLF(rawCfg)
   if (cfg.version !== installed) {
     const line = `version: ${installed}        # the silmari that wrote SILMARI.md and this file. \`sil update\` refreshes them and records the new version`
     const next = /^version:.*$/m.test(text) ? text.replace(/^version:.*$/m, line) : text.replace(/\n?$/, '\n') + line + '\n'
-    writeFileSync(cp, next); changed++; process.stdout.write(`Recorded: ${CONFIG_PATH} version ${installed}${cfg.version ? ` (was ${cfg.version})` : inferred ? ` (was ${inferred}, inferred from what sil init wrote)` : ' (no version recorded before: every note applies)'}\n`)
+    writeAs(cp, next, eolOf(rawCfg)); changed++; process.stdout.write(`Recorded: ${CONFIG_PATH} version ${installed}${cfg.version ? ` (was ${cfg.version})` : inferred ? ` (was ${inferred}, inferred from what sil init wrote)` : ' (no version recorded before: every note applies)'}\n`)
   }
   process.stdout.write(changed ? `Done: ${installed}${pending.length ? `. The agent applies ${UPDATES_DIR}/ at the start of the next session` : ''}\n` : `Up to date: ${installed}\n`)
   return 0

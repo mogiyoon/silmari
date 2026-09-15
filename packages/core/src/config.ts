@@ -19,7 +19,8 @@ export function parseConfig(text: string): Config {
   const cfg: Config = { strict: false, scan: { exclude: [] }, entry: [], lang: 'en', version: null }
   let section = ''
   for (const raw of text.split('\n')) {
-    const ln = raw.replace(/#.*$/, '').trimEnd()
+    // \r first: `.` stops at it, so in a CRLF file `#.*$` never matched and the comment became part of the value
+    const ln = raw.replace(/\r$/, '').replace(/#.*$/, '').trimEnd()
     if (!ln.trim()) continue
     const top = /^(\w+):\s*(.*)$/.exec(ln)
     if (top) {
