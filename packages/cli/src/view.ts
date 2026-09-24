@@ -7,7 +7,7 @@ import { gzipSync } from 'node:zlib'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolve, join, sep } from 'node:path'
 import { spawn } from 'node:child_process'
-import { loadDirAsync, existsIn, globIn, buildGraph, docCache, replaceBody, replaceBodies, writeRange, WriteError } from '@silmari/core'
+import { loadDirAsync, existsIn, globIn, buildGraph, docCache, replaceBody, replaceBodies, writeRange, WriteError } from '@silmari/core/node'
 import { readConfig } from './lint.ts'
 
 // Look for viewer.html next to the bundle (dist/sil.cjs) first. Otherwise use the workspace build.

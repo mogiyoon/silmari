@@ -1,4 +1,4 @@
-// Reads documents from a directory. This is the only I/O in core. Move it to an io package if one is added.
+// Reads documents from a directory: the file-system half of core, reachable only through @silmari/core/node.
 // Follows .gitignore. This was added after self-use included the entire Unity Library and .claude/worktrees directories.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url'
 import { cpus } from 'node:os'
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads'
 import ignore from 'ignore'
-import { parseDoc, type Doc } from './parse.ts'
-import { templateRegex } from './graph.ts'
+import { parseDoc, type Doc } from '../parse.ts'
+import { templateRegex } from '../graph.ts'
 
 /** Always excluded. The config cannot include these paths. They are not documents for the graph. */
 export const ALWAYS_EXCLUDE = ['.git', 'node_modules', '.sil', '.claude/worktrees']

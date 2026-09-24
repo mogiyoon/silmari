@@ -3,8 +3,8 @@
 // The order is pre-check, backup, atomic write, and post-check. It restores the file on failure (INV-5).
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, copyFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
-import { createHash } from 'node:crypto'
-import type { Range } from './ir.ts'
+import type { Range } from '../ir.ts'
+import { sha1Hex } from '../sha1.ts'
 
 export type WriteErrorCode = 'OUTSIDE_ROOT' | 'SYMLINK' | 'NOT_FOUND' | 'STALE' | 'VERIFY' | 'RANGE'
 export class WriteError extends Error {
@@ -27,7 +27,7 @@ export function writeRange(root: string, rel: string, range: Range, replacement:
   const src = readFileSync(p)                                                                                // Do not decode (INV-3).
   if (range.start < 0 || range.end > src.length || range.start > range.end) throw new WriteError('RANGE', `Range out of bounds: ${range.start}-${range.end} / ${src.length}`)
   // Reject changes made after graph creation by checking the whole-file hash (T-10). A range-only expect check misses text appended later.
-  if (opt.expectHash && createHash('sha1').update(src).digest('hex') !== opt.expectHash) throw new WriteError('STALE', `The file changed after the graph was built: ${rel}. Refresh and retry`)
+  if (opt.expectHash && sha1Hex(src) !== opt.expectHash) throw new WriteError('STALE', `The file changed after the graph was built: ${rel}. Refresh and retry`)
   const before = src.subarray(range.start, range.end)
   if (opt.expect && !before.equals(opt.expect)) throw new WriteError('STALE', `The bytes at that position differ from when the graph was built: ${rel}:${range.start}. Refresh and retry`)
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // sil. Design §7.7. init · update · migrate · lint · view · run.
 import { isMainThread } from 'node:worker_threads'
-import { findProjectRoot } from '@silmari/core'
+import { findProjectRoot } from '@silmari/core/node'
 import { lint } from './lint.ts'
 import { init, update, migrate } from './init.ts'
 import { silVersion as version } from './version.ts'

@@ -9,7 +9,7 @@
 // Models do not know our notation. The rules must be where models read them. SILMARI.md alone scored 0/3; a plain 'read SILMARI.md before working' line in CLAUDE.md scored 4/4 (experiment 5).
 import { resolve, dirname } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
-import { ENTRY_MAIN, CONFIG_PATH, UPDATES_DIR, loadDir, readConfig, findProjectRoot, compareVersions } from '@silmari/core'
+import { ENTRY_MAIN, CONFIG_PATH, UPDATES_DIR, loadDir, readConfig, findProjectRoot, compareVersions } from '@silmari/core/node'
 import { silVersion } from './version.ts'
 import { UPDATE_NOTES } from './updates.ts'
 import { backupDocs } from './backup.ts'

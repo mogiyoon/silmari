@@ -1,6 +1,5 @@
 // Reads only simple YAML from .sil/config.yaml. It works without the file. Every key is optional (§2.4).
-import { existsSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+// Reading the file is node/config.ts; this half only turns text into a Config, so it runs in a browser too.
 
 export interface Config {
   strict: boolean
@@ -42,11 +41,6 @@ export function parseConfig(text: string): Config {
 }
 const unq = (s: string) => s.trim().replace(/^["']|["']$/g, '')
 const list = (v: string) => (v.startsWith('[') ? v.slice(1, -1).split(',').map(unq).filter(Boolean) : [unq(v)])
-
-export function readConfig(root: string): Config {
-  const p = resolve(root, CONFIG_PATH)
-  return existsSync(p) ? parseConfig(readFileSync(p, 'utf8')) : parseConfig('')
-}
 
 /**
  * The entry point is SILMARI.md. It uses a distinct uppercase name at the root, like README.md and CLAUDE.md. No tool injects it automatically.

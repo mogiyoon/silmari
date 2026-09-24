@@ -1,7 +1,7 @@
 // Rule unit tests. Cases absent from the corpus are given as strings. Appendix A.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseDoc, buildGraph, parseConfig, findProjectRoot } from '../src/index.ts'
+import { parseDoc, buildGraph, parseConfig, findProjectRoot } from '../src/node/index.ts'
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -122,7 +122,7 @@ test('loadDir excludes .gitignore matches and .claude/worktrees', async () => {
   const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
-  const { loadDir } = await import('../src/load.ts')
+  const { loadDir } = await import('../src/node/load.ts')
   const d = mkdtempSync(join(tmpdir(), 'sil-'))
   for (const p of ['a.md', 'Library/x.md', '.claude/worktrees/w/b.md', 'docs/c.md']) { mkdirSync(join(d, p, '..'), { recursive: true }); writeFileSync(join(d, p), '# T\n') }
   writeFileSync(join(d, '.gitignore'), 'Library/\n')

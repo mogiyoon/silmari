@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { projectNotes, addDiagnostics, compareVersions, UPDATES_DIR, parseConfig, buildGraph, loadDir, existsIn, globIn } from '../src/index.ts'
+import { projectNotes, addDiagnostics, compareVersions, UPDATES_DIR, parseConfig, buildGraph, loadDir, existsIn, globIn } from '../src/node/index.ts'
 
 const fresh = (files: Record<string, string>) => {
   const d = mkdtempSync(join(tmpdir(), 'sil-notes-'))

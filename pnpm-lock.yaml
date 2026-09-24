@@ -43,9 +43,6 @@ importers:
       unified:
         specifier: ^11
         version: 11.0.5
-      unist-util-visit:
-        specifier: ^5
-        version: 5.1.0
     devDependencies:
       '@types/mdast':
         specifier: ^4.0.4
@@ -53,6 +50,9 @@ importers:
       '@types/node':
         specifier: ^22
         version: 22.20.1
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       typescript:
         specifier: ^5.7
         version: 5.9.3
