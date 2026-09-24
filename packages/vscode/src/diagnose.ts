@@ -1,5 +1,5 @@
 // Code independent of VS Code. Checks a document set by file. Tests cover only this file.
-import { buildGraph, parseDoc, loadDir, existsIn, globIn, readConfig, projectNotes, addDiagnostics, type Diagnostic, type Graph, type Doc } from '@silmari/core'
+import { buildGraph, parseDoc, loadDir, existsIn, globIn, readConfig, projectNotes, addDiagnostics, type Diagnostic, type Graph, type Doc } from '@silmari/core/node'
 
 export interface FileDiag { code: string; severity: Diagnostic['severity']; line: number; message: string; range?: { start: number; end: number } }
 

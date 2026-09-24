@@ -1,27 +1,9 @@
 // sil lint. Interface 1. Design §4.1 · §4.2.
 import { resolve } from 'node:path'
-import { loadDirAsync, existsIn, globIn, buildGraph, readConfig, projectNotes, addDiagnostics, type Diagnostic, type Severity } from '@silmari/core'
+import { loadDirAsync, existsIn, globIn, buildGraph, readConfig, projectNotes, addDiagnostics, format, summary } from '@silmari/core/node'
 import { silVersion } from './version.ts'
-export { readConfig }
-
-
-
-const ORDER: Record<Severity, number> = { error: 0, warning: 1, info: 2 }
-const MARK: Record<Severity, string> = { error: '✖', warning: '▲', info: '·' }
-
-export function format(diags: Diagnostic[]): string {
-  const sorted = [...diags].sort((a, b) => ORDER[a.severity] - ORDER[b.severity] || (a.where < b.where ? -1 : a.where > b.where ? 1 : 0))
-  const lines = sorted.map((d) => `${MARK[d.severity]} ${d.where}  ${d.code}  ${d.message}`)
-  const n = (s: Severity) => diags.filter((d) => d.severity === s).length
-  lines.push('', `error ${n('error')} · warning ${n('warning')} · info ${n('info')}`)
-  return lines.join('\n') + '\n'
-}
-
-/** Always printed: whether the graph is structured shows here. A migration that changed nothing leaves task 0 · call 0 */
-export const summary = (g: { stats: { files: number; nodesByKind: Partial<Record<string, number>>; edgesByType: Partial<Record<string, number>> } }): string => {
-  const k = g.stats.nodesByKind, e = g.stats.edgesByType
-  return `files ${g.stats.files} · task ${k.task ?? 0} · doc ${k.doc ?? 0} · file ${k.file ?? 0} · ghost ${k.ghost ?? 0} · call ${e.call ?? 0} · read ${e.read ?? 0} · write ${e.write ?? 0} · ref ${e.ref ?? 0} · mention ${e.mention ?? 0}`
-}
+// format and summary live in core so the terminal, the extension and a browser page print the same words
+export { readConfig, format, summary }
 
 export async function lint(dir: string, opt: { strict?: boolean; json?: boolean } = {}): Promise<number> {
   const root = resolve(dir)

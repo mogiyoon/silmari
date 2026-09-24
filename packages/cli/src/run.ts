@@ -24,7 +24,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, createWriteStream, readdirSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, resolve, relative, join, sep } from 'node:path'
-import { parseDoc, findProjectRoot, resolve as resolveLink, type Link, type Doc } from '@silmari/core'
+import { parseDoc, findProjectRoot, resolve as resolveLink, type Link, type Doc } from '@silmari/core/node'
 import { findExecutable, commandLine, starts, stopTree } from './spawn.ts'
 
 /** What sil has to know about one runtime CLI. Everything else about the command line belongs to the caller. */

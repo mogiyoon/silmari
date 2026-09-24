@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
-import { loadDir, existsIn, buildGraph, readConfig } from '@silmari/core'
+import { loadDir, existsIn, buildGraph, readConfig } from '@silmari/core/node'
 import { layout, labelBox, SIZE, entryView, skeleton } from '../src/layout.ts'
 
 // The golden corpus lives with core's tests; the personal migration corpus sits outside the repository (notes/ is ignored) and is used only where present
@@ -61,7 +61,7 @@ test('layout: data imported from a generated file comes in from above along the 
 })
 
 test('layout: an import label stacks above the reader, and the reader, its children and the row above all keep clear of it', async () => {
-  const { parseDoc } = await import('@silmari/core')
+  const { parseDoc } = await import('@silmari/core/node')
   const docs = new Map([
     ['흐름.md', parseDoc('흐름.md', '# 흐름\n\n[만들기](만들기.md)에 {{>x}}를 넘긴다.\n\n[일](일.md)에 {{>x}}를 넘긴다.\n')],
     ['만들기.md', parseDoc('만들기.md', '# 만들기\n\n[보고서](out/report.json)에 {{>report}}를 저장한다.\n')],
@@ -86,7 +86,7 @@ test('layout: an import label stacks above the reader, and the reader, its child
 })
 
 test('layout: in a cycle-only group (planning → implementation → review → planning), the start is planning and the cycle edge is review → planning', async () => {
-  const { parseDoc } = await import('@silmari/core')
+  const { parseDoc } = await import('@silmari/core/node')
   const docs = new Map([
     ['기획.md', parseDoc('기획.md', '# 기획\n\n요청을 받아 계획을 세운다.\n\n## 1. 구현\n\n[구현](구현.md)에 {{>계획}}을 전달해 {{<결과}}를 받는다.\n')],
     ['구현.md', parseDoc('구현.md', '# 구현\n\n## 하는 일\n\n[검토](검토.md)에 {{>결과}}를 전달해 {{<지적}}을 받는다.\n')],
@@ -102,7 +102,7 @@ test('layout: in a cycle-only group (planning → implementation → review → 
 })
 
 test('layout: a file that is only imported stands above its first reader and drops its line straight through the label', async () => {
-  const { parseDoc } = await import('@silmari/core')
+  const { parseDoc } = await import('@silmari/core/node')
   const docs = new Map([
     ['흐름.md', parseDoc('흐름.md', '# 흐름\n\n[일](일.md)에 {{>x}}를 넘긴다.\n\n[둘](둘.md)에 {{>x}}를 넘긴다.\n')],
     ['일.md', parseDoc('일.md', '# 일\n\n[규칙](rules.json)을 {{<rules}}로 불러온다.\n')],
@@ -125,7 +125,7 @@ test('layout: a file that is only imported stands above its first reader and dro
 })
 
 test('layout: a call that runs back to an earlier column takes the return lane even when the target is not the caller\'s ancestor', async () => {
-  const { parseDoc } = await import('@silmari/core')
+  const { parseDoc } = await import('@silmari/core/node')
   const docs = new Map([
     ['흐름.md', parseDoc('흐름.md', '# 흐름\n\n[가](가.md)에 {{>x}}를 넘긴다.\n\n[다](다.md)에 {{>x}}를 넘긴다.\n')],
     ['가.md', parseDoc('가.md', '# 가\n\n[나](나.md)에 {{>x}}를 넘긴다.\n')],
@@ -140,7 +140,7 @@ test('layout: a call that runs back to an earlier column takes the return lane e
 })
 
 test('layout: the configured entry point is a root, and orphan references stay visible below it', async () => {
-  const { parseDoc } = await import('@silmari/core')
+  const { parseDoc } = await import('@silmari/core/node')
   const docs = new Map([
     ['README.md', parseDoc('README.md', '# 읽어줘\n\n고아.\n')],
     ['흐름.md', parseDoc('흐름.md', '# 흐름\n\n[일](일.md)에 {{>x}}를 넘긴다.\n')],
@@ -156,7 +156,7 @@ test('layout: the configured entry point is a root, and orphan references stay v
 })
 
 test('layout: disconnected flows go into separate grid cells — A in column 1, B in column 2; a third and fourth start a second row', async () => {
-  const { parseDoc } = await import('@silmari/core')
+  const { parseDoc } = await import('@silmari/core/node')
   const flow = (n: string) => [[`${n}.md`, parseDoc(`${n}.md`, `# ${n}\n\n[${n}일](${n}일.md)에 {{>x}}를 넘긴다.\n`)], [`${n}일.md`, parseDoc(`${n}일.md`, `# ${n}일\n\n## 하는 일\n\n한다.\n`)]] as [string, ReturnType<typeof parseDoc>][]
   const two = buildGraph(new Map([...flow('a'), ...flow('b')]))
   const l2 = layout(two, new Set(two.nodes.map((n) => n.id)))
@@ -259,7 +259,7 @@ test('layout: the first caller keeps the child at its label even when another ca
 })
 
 test('layout: a parent sits at the vertical center of its children block, and the next parent block starts below — A/a1..a4 then B/b1..b3', async () => {
-  const { parseDoc } = await import('@silmari/core')
+  const { parseDoc } = await import('@silmari/core/node')
   const task = (n: string) => [`${n}.md`, parseDoc(`${n}.md`, `# ${n}\n\n## 하는 일\n\n한다.\n`)] as const
   const calls = (n: string, ks: string[]) => [`${n}.md`, parseDoc(`${n}.md`, `# ${n}\n\n${ks.map((k) => `[${k}](${k}.md)에 {{>x}}를 넘긴다.`).join('\n\n')}\n`)] as const
   const docs = new Map<string, ReturnType<typeof parseDoc>>([calls('root', ['A', 'B']), calls('A', ['a1', 'a2', 'a3', 'a4']), calls('B', ['b1', 'b2', 'b3']), ...['a1', 'a2', 'a3', 'a4', 'b1', 'b2', 'b3'].map(task)])
@@ -291,7 +291,7 @@ test("layout option labelOrder 'flow': labels follow the parent's line order top
 })
 
 test('entry view: the entry document registers flows by linking them; start files sit before it; downstream stops at the entry; shared documents belong to both', async () => {
-  const { parseDoc } = await import('@silmari/core')
+  const { parseDoc } = await import('@silmari/core/node')
   const docs = new Map([
     ['CLAUDE.md', parseDoc('CLAUDE.md', '# CLAUDE\n\n[SILMARI.md](SILMARI.md) is the entry point. Read it first.\n')],
     ['SILMARI.md', parseDoc('SILMARI.md', '# SILMARI\n\nFollow the [rules](RULES.md).\n\n## Flow\n\n- [Feature](a.md)\n- [Release](b.md)\n')],

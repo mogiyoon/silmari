@@ -261,6 +261,47 @@ There is no word list. Contract headings use the symbols `{{>…}}` / `{{<…}}`
 
 `SILMARI.md` is the entry point that agents read first. It contains the notation summary and links to the entry documents. The `.sil/layout.json` file beside the config stores per-user viewer state, including dragged nodes, dragged edge-label positions, folds and open panels. Drag a label by its ⠿ handle; its ↺ button restores just that label's automatic position. Add the file to `.gitignore`.
 
+## Use it from JavaScript
+
+The checker is a library as well as a command. `@silmari/core` holds the parser, the graph and the lint output, and touches no
+file system, so it runs in a browser as it does in Node: a docs site, a playground page or a web editor can check documents that
+were never written to disk.
+
+```sh
+npm i @silmari/core
+```
+
+```js
+import { parseDoc, buildGraph, format, summary } from '@silmari/core'
+
+// any set of md documents: the path is the key, the text is the value
+const files = {
+  'flow.md': '# Review\n\n## 1. Read it ((use a subagent))\n\nCall [read-file](read-file.md) with {{>target}} and receive {{<findings}}.\n\n## {{>Inputs}}\n- target (path)\n\n## {{<Outputs}}\n- findings\n',
+  'read-file.md': '# Read file\n\n## {{>Inputs}}\n- target (path)\n\n## {{<Outputs}}\n- findings\n',
+}
+
+const graph = buildGraph(new Map(Object.entries(files).map(([path, text]) => [path, parseDoc(path, text)])))
+
+process.stdout.write(graph.diagnostics.length ? format(graph.diagnostics) : 'No problems\n')
+process.stdout.write(summary(graph) + '\n')   // files 2 · task 2 · doc 0 · … · call 1 · …
+graph.nodes   // the boxes:  id · kind · title · headings · contract · hash
+graph.edges   // the arrows: from · to · type · sends · returns · tools · model · isolated
+```
+
+`format` and `summary` are the same two functions `sil lint` prints with, so a page shows exactly what the terminal shows. The
+`Graph` is the same IR `sil view` draws and `sil lint --json` prints.
+
+Reading a folder needs Node, so it is a second entry point, `@silmari/core/node`. It re-exports everything above and adds
+`loadDir` · `loadDirAsync` (walk a directory, obey `.gitignore`), `readConfig` · `projectNotes`, `findProjectRoot`, and the
+writer that edits link targets and heading bodies in place.
+
+```js
+import { loadDir, buildGraph, readConfig, existsIn, globIn, format } from '@silmari/core/node'
+
+const cfg = readConfig(root)
+const graph = buildGraph(loadDir(root, cfg.scan.exclude), { exists: existsIn(root), glob: globIn(root), entry: cfg.entry })
+```
+
 ## What it never does
 
 - It does not call a model API. `sil run` starts the installed agent CLI with the prompt exactly as written in your document. No assembler rewrites prompts.

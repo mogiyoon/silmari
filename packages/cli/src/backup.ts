@@ -3,7 +3,7 @@
 // agent, so what the agent changes can always be put back by copying the folder over. Nothing is ever deleted here; the user prunes.
 import { existsSync, mkdirSync, copyFileSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
-import { loadDir, readConfig, findProjectRoot } from '@silmari/core'
+import { loadDir, readConfig, findProjectRoot } from '@silmari/core/node'
 
 export const BACKUPS_DIR = '.sil/backups'
 

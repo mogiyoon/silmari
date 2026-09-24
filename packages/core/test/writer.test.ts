@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, readd
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
-import { parseDoc, buildGraph, writeRange, retargetLink, replaceBody, replaceBodies, WriteError } from '../src/index.ts'
+import { parseDoc, buildGraph, writeRange, retargetLink, replaceBody, replaceBodies, WriteError } from '../src/node/index.ts'
 
 const fresh = () => mkdtempSync(join(tmpdir(), 'sil-w-'))
 const linkRange = (root: string, rel: string, to: string) => {

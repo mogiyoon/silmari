@@ -1,45 +1,78 @@
 {
   "name": "@silmari/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "silmari parser, IR and lint: a set of md documents → a graph. Runs in the browser; @silmari/core/node adds the file system",
+  "keywords": [
+    "markdown",
+    "agent",
+    "prompt",
+    "graph",
+    "lint",
+    "silmari"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/mogiyoon/silmari#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mogiyoon/silmari.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/mogiyoon/silmari/issues"
+  },
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./node": {
+      "types": "./src/node/index.ts",
+      "import": "./src/node/index.ts",
+      "default": "./src/node/index.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./node": {
+        "types": "./dist/node/index.d.ts",
+        "import": "./dist/node/index.js",
+        "default": "./dist/node/index.js"
+      }
+    }
   },
   "scripts": {
+    "prepack": "node scripts/prepack.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "build": "tsc -p tsconfig.build.json"
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "github-slugger": "^2.0.0",
     "ignore": "^7.0.8",
     "remark-gfm": "^4",
     "remark-parse": "^11",
-    "unified": "^11",
-    "unist-util-visit": "^5"
+    "unified": "^11"
   },
   "devDependencies": {
     "@types/mdast": "^4.0.4",
     "@types/node": "^22",
+    "esbuild": "^0.28.2",
     "typescript": "^5.7"
-  },
-  "description": "silmari parser, IR and lint: a set of md documents → a graph",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/mogiyoon/silmari",
-    "directory": "packages/core"
-  },
-  "files": [
-    "dist",
-    "src"
-  ],
-  "publishConfig": {
-    "exports": {
-      ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js"
-      }
-    }
   }
 }

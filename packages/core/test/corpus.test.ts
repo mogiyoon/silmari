@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
-import { loadDir, buildGraph, readConfig } from '../src/index.ts'
+import { loadDir, buildGraph, readConfig } from '../src/node/index.ts'
 
 const root = fileURLToPath(new URL('./fixtures/after/', import.meta.url))
 const cfg = readConfig(root)

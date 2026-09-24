@@ -2,7 +2,7 @@
 import * as vscode from 'vscode'
 import { readFileSync, existsSync, writeFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
-import { findProjectRoot } from '@silmari/core'
+import { findProjectRoot } from '@silmari/core/node'
 import { graphWithOverride, byFile, toLineCol, yieldToVscode } from './diagnose.ts'
 
 const EXCLUDE = ['node_modules', '.sil', '.git']

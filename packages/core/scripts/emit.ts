@@ -2,7 +2,7 @@
 // 실행: node --experimental-strip-types packages/core/scripts/emit.ts
 import { writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { loadDir, buildGraph } from '../src/index.ts'
+import { loadDir, buildGraph } from '../src/node/index.ts'
 
 const root = fileURLToPath(new URL('../test/fixtures/after/', import.meta.url))
 const graph = buildGraph(loadDir(root))

@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { loadDir, buildGraph, readConfig } from '../src/index.ts'
+import { loadDir, buildGraph, readConfig } from '../src/node/index.ts'
 import type { Graph } from '../src/ir.ts'
 
 const root = fileURLToPath(new URL('./fixtures/after/', import.meta.url))

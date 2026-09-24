@@ -7,8 +7,9 @@ import remarkParse from 'remark-parse'
 import remarkGfm from 'remark-gfm'
 import type { Root, RootContent, PhrasingContent, ListItem } from 'mdast'
 import { slug as ghSlug } from 'github-slugger'
-import { createHash } from 'node:crypto'
 import type { Heading, Range, ValueType } from './ir.ts'
+import { sha1Hex } from './sha1.ts'
+import { utf8Encode, utf8Length } from './utf8.ts'
 
 // A subagent label is a bracket marker at the end of a heading. The graph reads the brackets as a marker. The text can be in any language: ((서브 에이전트 사용)) ((use a subagent)) ((サブエージェント)).
 // The model reads the words as instructions. The graph reads the marker as a label (§1.5): double parentheses at the end of the heading,
@@ -66,7 +67,7 @@ export function slug(t: string): string {
 const stripCode = (s: string) => s.replace(/`[^`]*`/g, (m) => ' '.repeat(m.length))
 
 /** Converts a UTF-16 offset to a byte offset (INV-8). */
-export const byteOffset = (src: string, u16: number) => Buffer.byteLength(src.slice(0, u16), 'utf8')
+export const byteOffset = (src: string, u16: number) => utf8Length(src, u16)
 
 const processor = unified().use(remarkParse).use(remarkGfm)
 
@@ -107,7 +108,7 @@ export function parseDoc(rel: string, src: string): Doc {
   const defs = new Map<string, string>()
   for (const n of tree.children) if (n.type === 'definition') defs.set(n.label ?? n.identifier, n.url)
 
-  const doc: Doc = { rel, fm, hash: createHash('sha1').update(Buffer.from(src, 'utf8')).digest('hex'), title: null, desc: '', headings: [], anchors: new Set(), contractIn: [], contractOut: [], contractTypes: {}, links: [], diags: [], ignores: new Set() }
+  const doc: Doc = { rel, fm, hash: sha1Hex(utf8Encode(src)), title: null, desc: '', headings: [], anchors: new Set(), contractIn: [], contractOut: [], contractTypes: {}, links: [], diags: [], ignores: new Set() }
   const ig = /^<!--\s*sil:ignore\s+([A-Z0-9-]+(?:\s*,\s*[A-Z0-9-]+)*)\s*-->/.exec(body.trimStart())
   if (ig) for (const c of ig[1].split(',')) doc.ignores.add(c.trim())
   const L = (n: { position?: { start: { line: number } } }) => (n.position?.start.line ?? 0) + bodyLineOffset
@@ -118,7 +119,7 @@ export function parseDoc(rel: string, src: string): Doc {
   let h1s = 0
   const rawLines = body.split('\n')
   // Range must be file-based (INV-8). mdast offsets start at body after the frontmatter, so shift them by that amount.
-  const fmBytes = Buffer.byteLength(src, 'utf8') - Buffer.byteLength(body, 'utf8')
+  const fmBytes = utf8Length(src) - utf8Length(body)
   const B = (u16: number) => byteOffset(body, u16) + fmBytes
 
   const handleBlock = (phrasing: PhrasingContent[], line: number) => {
@@ -254,18 +255,18 @@ export function parseDoc(rel: string, src: string): Doc {
   // A heading body is the source from the next line to the next heading. Remove only blank lines at both ends. Also calculate its byte range (INV-8).
   const idx = (line: number) => line - 1 - bodyLineOffset
   const lineByte: number[] = []
-  { let acc = fmBytes; for (const l of rawLines) { lineByte.push(acc); acc += Buffer.byteLength(l, 'utf8') + 1 } }
+  { let acc = fmBytes; for (const l of rawLines) { lineByte.push(acc); acc += utf8Length(l) + 1 } }
   doc.headings.forEach((h, i) => {
     const next = doc.headings[i + 1]
     const from = idx(h.line) + 1, to = next ? idx(next.line) : rawLines.length
     let a = from, b = to - 1
     while (a <= b && !rawLines[a].trim()) a++
     while (b >= a && !rawLines[b].trim()) b--
-    if (a > b) { const at = lineByte[from] ?? Buffer.byteLength(src, 'utf8'); h.body = ''; h.range = { start: at, end: at }; return }
+    if (a > b) { const at = lineByte[from] ?? utf8Length(src); h.body = ''; h.range = { start: at, end: at }; return }
     let body = rawLines.slice(a, b + 1).join('\n')
     if (body.endsWith('\r')) body = body.slice(0, -1) // Handle the last line of a CRLF file.
     h.body = body
-    h.range = { start: lineByte[a], end: lineByte[a] + Buffer.byteLength(body, 'utf8') }
+    h.range = { start: lineByte[a], end: lineByte[a] + utf8Length(body) }
   })
   if (h1s === 0) doc.diags.push({ code: 'L-N06', severity: 'info', where: rel, message: 'No H1. The file name is used as the title' })
   else if (h1s > 1) doc.diags.push({ code: 'L-N06', severity: 'info', where: rel, message: `${h1s} H1 headings. The first is used as the title` })

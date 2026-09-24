@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { loadDir, loadDirAsync, docCache, MIN_PARALLEL } from '../src/index.ts'
+import { loadDir, loadDirAsync, docCache, MIN_PARALLEL } from '../src/node/index.ts'
 
 const corpus = (n: number) => {
   const d = mkdtempSync(join(tmpdir(), 'sil-load-'))

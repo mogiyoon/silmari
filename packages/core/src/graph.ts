@@ -1,6 +1,6 @@
 // Builds a graph and diagnostics from documents. Design document §3 and Appendix A.
 // Unmarked Markdown files stay quiet. L-G01 runs only when there is a call edge. L-G06 checks only calls. L-N05 and L-N06 check only task nodes.
-import { posix as path } from 'node:path'
+import * as path from './path.ts'
 import type { Graph, Node, Edge, Diagnostic, Contract } from './ir.ts'
 import type { Doc, Link } from './parse.ts'
 import { isConventionalEntry } from './config.ts'
