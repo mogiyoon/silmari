@@ -10,12 +10,15 @@ export interface Config {
   lang: string
   /** The silmari version that wrote SILMARI.md and this file. `sil update` refreshes both and records the new one. Null when never recorded (before 0.3.1). */
   version: string | null
+  /** sil run. keepSession: let the runtime save each step as a session (claude: no --no-session-persistence). --keep-session /
+   *  --no-keep-session on the command line win over it */
+  run: { keepSession: boolean }
 }
 
 export const CONFIG_PATH = '.sil/config.yaml'
 
 export function parseConfig(text: string): Config {
-  const cfg: Config = { strict: false, scan: { exclude: [] }, entry: [], lang: 'en', version: null }
+  const cfg: Config = { strict: false, scan: { exclude: [] }, entry: [], lang: 'en', version: null, run: { keepSession: false } }
   let section = ''
   for (const raw of text.split('\n')) {
     // \r first: `.` stops at it, so in a CRLF file `#.*$` never matched and the comment became part of the value
@@ -33,6 +36,7 @@ export function parseConfig(text: string): Config {
     }
     const sub = /^\s+(\w+):\s*(.*)$/.exec(ln)
     if (sub && section === 'scan' && sub[1] === 'exclude') cfg.scan.exclude = list(sub[2])
+    if (sub && section === 'run' && sub[1] === 'keep_session') cfg.run.keepSession = sub[2].trim() === 'true'
     // `words:` and `contract:` from 0.1.x are ignored: contract headings are now the symbols `## {{>…}}` / `## {{<…}}` in any language
     const item = /^\s*-\s*(.+)$/.exec(ln)
     if (item && section === 'entry') cfg.entry.push(unq(item[1]))

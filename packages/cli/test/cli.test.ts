@@ -236,7 +236,12 @@ test('run: checks the call line before anything starts — (( )) label, --send n
   const r = (...a: string[]) => spawnSync(process.execPath, ['--experimental-strip-types', MAIN, 'run', ...a], { encoding: 'utf8', cwd: d })
   const ok = ['claude', '--step', 'flow.md#1', '--send', 'marker=marker.txt', '--send', 'prefs={"a":1}', '--model', 'haiku', '--tools', 'Read']
   const dry = r(...ok, '--dry-run')
-  assert.equal(dry.status, 0); assert.equal(dry.stdout.trim(), 'claude -p --output-format stream-json --verbose --model haiku --tools Read < <prompt>','no {{-…}} on the call line: the project start files reach the subagent, as people expect')
+  assert.equal(dry.status, 0); assert.equal(dry.stdout.trim(), 'claude -p --output-format stream-json --verbose --no-session-persistence --model haiku --tools Read < <prompt>','no {{-…}} on the call line: the project start files reach the subagent, as people expect; sil keeps its own record, so claude saves no session')
+  assert.equal(r(...ok, '--keep-session', '--dry-run').stdout.trim(), 'claude -p --output-format stream-json --verbose --model haiku --tools Read < <prompt>', '--keep-session lets claude save the session')
+  mkdirSync(resolve(d, '.sil')); writeFileSync(resolve(d, '.sil/config.yaml'), 'run:\n  keep_session: true\n')
+  assert.equal(r(...ok, '--dry-run').stdout.trim(), 'claude -p --output-format stream-json --verbose --model haiku --tools Read < <prompt>', 'run: keep_session keeps sessions for the whole project')
+  assert.equal(r(...ok, '--no-keep-session', '--dry-run').stdout.trim(), 'claude -p --output-format stream-json --verbose --no-session-persistence --model haiku --tools Read < <prompt>', '--no-keep-session wins over the config')
+  rmSync(resolve(d, '.sil'), { recursive: true, force: true })
   const p = r(...ok, '--prompt-only').stdout
   assert.match(p, /^This session runs one step of a flow as a subagent[\s\S]*the project rules you were started with still apply/, 'the prompt says the start files still apply'); assert.match(p, /## Values for this run\n- marker:\nmarker\.txt\n- prefs:\n\{"a":1\}/); assert.match(p, /keys are: report/)
   const refused = (args: string[], re: RegExp) => { const x = r(...args); assert.equal(x.status, 1, args.join(' ')); assert.match(x.stderr, re) }
@@ -251,13 +256,13 @@ test('run: checks the call line before anything starts — (( )) label, --send n
   refused(['claude', '--step', 'flow.md#1', '--send', 'marker', 'marker.txt'], /--send expects name=value/)
   refused(['gemini', '--step', 'flow.md#1'], /unknown runtime "gemini"\. Known: claude, codex/)
   refused(['claude', '--step', 'flow.md#9', '--send', 'x=1'], /no heading numbered 9/)
-  const help = r('--help'); assert.equal(help.status, 0); assert.match(help.stdout, /sil run claude --step flow\.md#1/); assert.match(help.stdout, /enforcement: os-sandbox/)
+  const help = r('--help'); assert.equal(help.status, 0); assert.match(help.stdout, /sil run claude --step flow\.md#1/); assert.match(help.stdout, /enforcement: os-sandbox/); assert.match(help.stdout, /--keep-session/)
   const codex = r('codex', ...ok.slice(1, 7), '-m', 'gpt-5.4-mini', '-s', 'read-only', '--dry-run')
   assert.equal(codex.stdout.trim(), 'codex exec --json --skip-git-repo-check - -m gpt-5.4-mini -s read-only < <prompt>')
   // {{-…}} on the call line: sil adds the runtime's own switch for its project start files, and says so in the prompt
   const cut = ['--step', 'flow.md#3', '--send', 'marker=marker.txt', '--send', 'prefs={"a":1}']
   assert.equal(r('claude', ...cut, '--model', 'haiku', '--tools', 'Read', '--dry-run').stdout.trim(),
-    'claude -p --output-format stream-json --verbose --setting-sources user --model haiku --tools Read < <prompt>')
+    'claude -p --output-format stream-json --verbose --setting-sources user --no-session-persistence --model haiku --tools Read < <prompt>')
   assert.equal(r('codex', ...cut, '-m', 'gpt-5.4-mini', '-s', 'read-only', '--dry-run').stdout.trim(),
     'codex exec --json --skip-git-repo-check -c project_doc_max_bytes=0 - -m gpt-5.4-mini -s read-only < <prompt>')
   assert.match(r('claude', ...cut, '--model', 'haiku', '--tools', 'Read', '--prompt-only').stdout,
@@ -318,7 +323,7 @@ process.stdin.setEncoding('utf8').on('data', (c) => { input += c }).on('end', as
     assert.equal(failed.status, 1, failed.stderr)
     assert.match(failed.stderr, /claude reported an error \(error_max_turns\)\. Not cached; record \.sil\/run\//)
     const call = JSON.parse(readFileSync(resolve(d, '.sil/fake-call.json'), 'utf8')) as { args: string[]; stdin: string }
-    assert.deepEqual(call.args, ['-p', '--output-format', 'stream-json', '--verbose', '--model', 'haiku', '--tools', 'Read'], 'the prompt is not on the command line')
+    assert.deepEqual(call.args, ['-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--model', 'haiku', '--tools', 'Read'], 'the prompt is not on the command line')
     assert.match(call.stdin, /^This session runs one step of a flow[\s\S]*\n# Checker\n\nRead \[the rules\]\(rules\.md\)\.\n[\s\S]*- spec:\nspec\.txt\n/, 'the prompt arrives on stdin')
     assert.doesNotMatch(call.stdin, /sil:|type: task|\r/, 'the CRLF frontmatter does not leak into the prompt, and the body is LF')
     const ok = sil('ok')
