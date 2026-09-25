@@ -238,6 +238,10 @@ test('run: checks the call line before anything starts — (( )) label, --send n
   const dry = r(...ok, '--dry-run')
   assert.equal(dry.status, 0); assert.equal(dry.stdout.trim(), 'claude -p --output-format stream-json --verbose --no-session-persistence --model haiku --tools Read < <prompt>','no {{-…}} on the call line: the project start files reach the subagent, as people expect; sil keeps its own record, so claude saves no session')
   assert.equal(r(...ok, '--keep-session', '--dry-run').stdout.trim(), 'claude -p --output-format stream-json --verbose --model haiku --tools Read < <prompt>', '--keep-session lets claude save the session')
+  mkdirSync(resolve(d, '.sil')); writeFileSync(resolve(d, '.sil/config.yaml'), 'run:\n  keep_session: true\n')
+  assert.equal(r(...ok, '--dry-run').stdout.trim(), 'claude -p --output-format stream-json --verbose --model haiku --tools Read < <prompt>', 'run: keep_session keeps sessions for the whole project')
+  assert.equal(r(...ok, '--no-keep-session', '--dry-run').stdout.trim(), 'claude -p --output-format stream-json --verbose --no-session-persistence --model haiku --tools Read < <prompt>', '--no-keep-session wins over the config')
+  rmSync(resolve(d, '.sil'), { recursive: true, force: true })
   const p = r(...ok, '--prompt-only').stdout
   assert.match(p, /^This session runs one step of a flow as a subagent[\s\S]*the project rules you were started with still apply/, 'the prompt says the start files still apply'); assert.match(p, /## Values for this run\n- marker:\nmarker\.txt\n- prefs:\n\{"a":1\}/); assert.match(p, /keys are: report/)
   const refused = (args: string[], re: RegExp) => { const x = r(...args); assert.equal(x.status, 1, args.join(' ')); assert.match(x.stderr, re) }

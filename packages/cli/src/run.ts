@@ -24,7 +24,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, createWriteStream, readdirSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, resolve, relative, join, sep } from 'node:path'
-import { parseDoc, findProjectRoot, resolve as resolveLink, type Link, type Doc } from '@silmari/core/node'
+import { parseDoc, findProjectRoot, readConfig, resolve as resolveLink, type Link, type Doc } from '@silmari/core/node'
 import { findExecutable, commandLine, starts, stopTree } from './spawn.ts'
 
 /** What sil has to know about one runtime CLI. Everything else about the command line belongs to the caller. */
@@ -108,6 +108,7 @@ export const runUsage = (): string => `sil run <runtime> --step <flow.md>#<N> --
     --send name=value      a value for a {{>name}} on the call line        --send name=@file   a file's content (path from the current folder)
     --dry-run              print the command that would run, and stop      --prompt-only       print the assembled prompt
     --keep-session         let the runtime save this run as a session you can resume (off by default: sil keeps its own record)
+    --no-keep-session      do not, even when .sil/config.yaml says run: keep_session: true (that key keeps them for the whole project)
 
   What --send takes, by the hint on that name in the called document's {{>…}} list (checked before anything starts):
     none or (text)   the value itself, or @file for a file's content     --send tone=formal   --send note=@memo.md
@@ -155,7 +156,7 @@ export async function run(argv: string[]): Promise<number> {
   if (!ad) return fail(`unknown runtime "${rt}". Known: ${Object.keys(ADAPTERS).join(', ')}. Installed: ${installedRuntimes()}`)
   if (argv[1] === '--help' || argv[1] === '-h') { process.stdout.write(runUsage()); return 0 }
   let step: string | undefined; const sends = new Map<string, { value: string; fromFile: boolean }>(); const rest: string[] = []
-  let dry = false, promptOnly = false, keepSession = false
+  let dry = false, promptOnly = false, keepFlag: boolean | undefined
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--step' && i + 1 < argv.length) { step = argv[++i]; continue }
@@ -170,7 +171,7 @@ export async function run(argv: string[]): Promise<number> {
     }
     if (a === '--dry-run') { dry = true; continue }
     if (a === '--prompt-only') { promptOnly = true; continue }
-    if (a === '--keep-session') { keepSession = true; continue }
+    if (a === '--keep-session' || a === '--no-keep-session') { keepFlag = a === '--keep-session'; continue }
     rest.push(a)
   }
   if (!step || !step.includes('#')) return fail('--step <flow.md>#<N> is required')
@@ -195,6 +196,8 @@ export async function run(argv: string[]): Promise<number> {
   // The subagent's working directory is the project root, and every path in the prompt is written from there
   const root = findProjectRoot(flowDir) ?? flowDir
   const fromRoot = (abs: string) => relative(root, abs).split(sep).join('/')
+  // Sessions: the flag for this run, else the project's run: keep_session, else off
+  const keepSession = keepFlag ?? readConfig(root).run.keepSession
   // The called document: its body is the prompt, its contract types are checked. The target is read the way lint reads it: percent-escapes
   // decoded (`my%20agent.md`), {{>name}} filled from --send, a leading / meaning the project root
   let callPath = link.target.split('#')[0]; try { callPath = decodeURIComponent(callPath) } catch { /* keep it as written */ }
@@ -244,7 +247,7 @@ export async function run(argv: string[]): Promise<number> {
   const key = createHash('sha1').update(JSON.stringify([rt, args, prompt, pointed.map((p) => [fromRoot(p), fingerprint(p)])])).digest('hex').slice(0, 16)
   const cachePath = join(runDir, 'cache', `${key}.json`)
   const rules = link.noRules ? `project rules cut ({{-${link.noRules}}})` : 'project start files inherited'
-  const session = !ad.sessionOffFlags?.length ? 'session saved by the runtime' : keepSession ? 'session kept (--keep-session)' : 'session not saved'
+  const session = !ad.sessionOffFlags?.length ? 'session saved by the runtime' : keepSession ? `session kept (${keepFlag ? '--keep-session' : 'run: keep_session in .sil/config.yaml'})` : 'session not saved'
   process.stderr.write(`→ ${link.target} · ${rt} · ${rest.join(' ') || '(no flags)'} · ${rules} · ${session} · enforcement ${ad.enforcement} · ${ad.verifies ? 'verified from the output' : 'unverified: this runtime does not report the tools or model it used'}\n`)
   if (existsSync(cachePath)) { const c = JSON.parse(readFileSync(cachePath, 'utf8')) as { out: unknown; ran: string }; process.stderr.write(`· cached from ${c.ran}; nothing ran\n`); process.stdout.write(JSON.stringify(c.out) + '\n'); return 0 }
   const exe = findExecutable(ad.exe)
