@@ -31,12 +31,15 @@ import { findExecutable, commandLine, starts, stopTree } from './spawn.ts'
 export interface Adapter {
   /** Executable name */
   exe: string
-  /** Base arguments. `{noRules}` is replaced by noRulesFlags or by nothing. The prompt is not among them: it is written to stdin
+  /** Base arguments. `{noRules}` is replaced by noRulesFlags or by nothing, `{sessionOff}` by sessionOffFlags unless --keep-session. The prompt is not among them: it is written to stdin
    *  (claude -p reads it there when no prompt argument is given; codex exec reads it for `-`) */
   base: string[]
   /** Flags that switch this runtime's project start files off. Used only when the call line carries {{-…}}.
    *  Empty when the runtime has no such switch: sil then refuses the step rather than running it with the rules still in. */
   noRulesFlags: string[]
+  /** Flags that keep the runtime from saving this run as a session. sil keeps its own record under .sil/run/, so the runtime's copy
+   *  only fills the user's session list. Absent or empty when the runtime has no such switch */
+  sessionOffFlags?: string[]
   /** Flags that really restrict tools, and flags that set the model. Presence checks only; values are never interpreted. */
   toolsFlags: string[]; modelFlags: string[]
   /** Flags that look like a restriction but are not. Refused with the reason so the orchestrator can retry. */
@@ -54,9 +57,11 @@ export interface Adapter {
 export const ADAPTERS: Record<string, Adapter> = {
   claude: {
     exe: 'claude',
-    base: ['-p', '--output-format', 'stream-json', '--verbose', '{noRules}'],
+    base: ['-p', '--output-format', 'stream-json', '--verbose', '{noRules}', '{sessionOff}'],
     // --setting-sources user: no CLAUDE.md injection (measured: self-report, token count and a behavioural rule all agree)
     noRulesFlags: ['--setting-sources', 'user'],
+    // --no-session-persistence: works only with -p, which sil always passes. Without it every step lands in ~/.claude/projects/
+    sessionOffFlags: ['--no-session-persistence'],
     toolsFlags: ['--tools', '--disallowedTools', '--disallowed-tools'], modelFlags: ['--model'],
     rejected: { '--allowedTools': 'does not restrict tools; it only pre-approves permissions. Use --tools <Tool,Tool>.', '--allowed-tools': 'does not restrict tools; it only pre-approves permissions. Use --tools <Tool,Tool>.' },
     enforcement: 'tool-removal', verifies: true,
@@ -80,6 +85,7 @@ export const ADAPTERS: Record<string, Adapter> = {
     base: ['exec', '--json', '--skip-git-repo-check', '{noRules}', '-'],
     // -c project_doc_max_bytes=0: no AGENTS.md injection (measured)
     noRulesFlags: ['-c', 'project_doc_max_bytes=0'],
+    sessionOffFlags: [],
     toolsFlags: ['-s', '--sandbox'], modelFlags: ['-m', '--model'],
     rejected: {},
     enforcement: 'os-sandbox', verifies: false,
@@ -101,6 +107,7 @@ export const runUsage = (): string => `sil run <runtime> --step <flow.md>#<N> --
   goes to the runtime unchanged. Put the model named by {{#…}} and the tools named by {{+…}} in the runtime's own flags.
     --send name=value      a value for a {{>name}} on the call line        --send name=@file   a file's content (path from the current folder)
     --dry-run              print the command that would run, and stop      --prompt-only       print the assembled prompt
+    --keep-session         let the runtime save this run as a session you can resume (off by default: sil keeps its own record)
 
   What --send takes, by the hint on that name in the called document's {{>…}} list (checked before anything starts):
     none or (text)   the value itself, or @file for a file's content     --send tone=formal   --send note=@memo.md
@@ -120,7 +127,7 @@ export const runUsage = (): string => `sil run <runtime> --step <flow.md>#<N> --
   A run that fails is recorded under .sil/run/ and not cached.
 
   Runtimes and the flags that restrict tools (a flag that only pre-approves permissions is refused):
-${Object.entries(ADAPTERS).map(([n, a]) => `    ${n.padEnd(8)} ${a.example}\n${''.padEnd(13)}tools: ${a.toolsFlags.join(' / ')} · model: ${a.modelFlags.join(' / ')} · enforcement: ${a.enforcement} · ${a.verifies ? 'verified from the output' : 'not verifiable from the output'} · {{-…}}: ${a.noRulesFlags.length ? a.noRulesFlags.join(' ') : 'not supported'}`).join('\n')}
+${Object.entries(ADAPTERS).map(([n, a]) => `    ${n.padEnd(8)} ${a.example}\n${''.padEnd(13)}tools: ${a.toolsFlags.join(' / ')} · model: ${a.modelFlags.join(' / ')} · enforcement: ${a.enforcement} · ${a.verifies ? 'verified from the output' : 'not verifiable from the output'} · {{-…}}: ${a.noRulesFlags.length ? a.noRulesFlags.join(' ') : 'not supported'} · no session: ${a.sessionOffFlags?.length ? a.sessionOffFlags.join(' ') : 'not supported'}`).join('\n')}
 `
 
 const fail = (msg: string): number => { process.stderr.write(`sil run: ${msg}\n`); return 1 }
@@ -148,7 +155,7 @@ export async function run(argv: string[]): Promise<number> {
   if (!ad) return fail(`unknown runtime "${rt}". Known: ${Object.keys(ADAPTERS).join(', ')}. Installed: ${installedRuntimes()}`)
   if (argv[1] === '--help' || argv[1] === '-h') { process.stdout.write(runUsage()); return 0 }
   let step: string | undefined; const sends = new Map<string, { value: string; fromFile: boolean }>(); const rest: string[] = []
-  let dry = false, promptOnly = false
+  let dry = false, promptOnly = false, keepSession = false
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--step' && i + 1 < argv.length) { step = argv[++i]; continue }
@@ -163,6 +170,7 @@ export async function run(argv: string[]): Promise<number> {
     }
     if (a === '--dry-run') { dry = true; continue }
     if (a === '--prompt-only') { promptOnly = true; continue }
+    if (a === '--keep-session') { keepSession = true; continue }
     rest.push(a)
   }
   if (!step || !step.includes('#')) return fail('--step <flow.md>#<N> is required')
@@ -223,7 +231,7 @@ export async function run(argv: string[]): Promise<number> {
     '', '## Reply format', `Reply with only a JSON object whose keys are: ${link.returns.join(', ') || 'result'}`, '',
   ].join('\n')
   if (promptOnly) { process.stdout.write(prompt); return 0 }
-  const args = [...ad.base.flatMap((x) => (x === '{noRules}' ? (link.noRules ? ad.noRulesFlags : []) : [x])), ...rest]
+  const args = [...ad.base.flatMap((x) => (x === '{noRules}' ? (link.noRules ? ad.noRulesFlags : []) : x === '{sessionOff}' ? (keepSession ? [] : ad.sessionOffFlags ?? []) : [x])), ...rest]
   if (dry) { process.stdout.write(`${[ad.exe, ...args].join(' ')} < <prompt>\n`); return 0 }
   // Records live under the project's .sil/run/. An identical repeat is answered from the cache: same runtime, arguments and prompt, and the
   // same content in every file the prompt points at. The prompt carries paths, not contents, so a (path) file or a linked document that
@@ -236,7 +244,8 @@ export async function run(argv: string[]): Promise<number> {
   const key = createHash('sha1').update(JSON.stringify([rt, args, prompt, pointed.map((p) => [fromRoot(p), fingerprint(p)])])).digest('hex').slice(0, 16)
   const cachePath = join(runDir, 'cache', `${key}.json`)
   const rules = link.noRules ? `project rules cut ({{-${link.noRules}}})` : 'project start files inherited'
-  process.stderr.write(`→ ${link.target} · ${rt} · ${rest.join(' ') || '(no flags)'} · ${rules} · enforcement ${ad.enforcement} · ${ad.verifies ? 'verified from the output' : 'unverified: this runtime does not report the tools or model it used'}\n`)
+  const session = !ad.sessionOffFlags?.length ? 'session saved by the runtime' : keepSession ? 'session kept (--keep-session)' : 'session not saved'
+  process.stderr.write(`→ ${link.target} · ${rt} · ${rest.join(' ') || '(no flags)'} · ${rules} · ${session} · enforcement ${ad.enforcement} · ${ad.verifies ? 'verified from the output' : 'unverified: this runtime does not report the tools or model it used'}\n`)
   if (existsSync(cachePath)) { const c = JSON.parse(readFileSync(cachePath, 'utf8')) as { out: unknown; ran: string }; process.stderr.write(`· cached from ${c.ran}; nothing ran\n`); process.stdout.write(JSON.stringify(c.out) + '\n'); return 0 }
   const exe = findExecutable(ad.exe)
   if (!exe) return fail(`${ad.exe} was not found on PATH. Installed runtimes: ${installedRuntimes()}`)
