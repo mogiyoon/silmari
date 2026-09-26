@@ -1,6 +1,6 @@
 {
   "name": "@silmari/core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "silmari parser, IR and lint: a set of md documents → a graph. Runs in the browser; @silmari/core/node adds the file system",
   "keywords": [
     "markdown",
