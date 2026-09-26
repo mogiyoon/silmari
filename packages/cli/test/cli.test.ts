@@ -255,7 +255,7 @@ test('run: checks the call line before anything starts — (( )) label, --send n
   refused(['claude', '--step', 'flow.md#1', '--send', 'marker=marker.txt', '--send', 'prefs=nope', '--model', 'haiku', '--tools', 'Read'], /\(json\) input but the value is not valid JSON/)
   refused(['claude', '--step', 'flow.md#1', '--send', 'marker', 'marker.txt'], /--send expects name=value/)
   refused(['gemini', '--step', 'flow.md#1'], /unknown runtime "gemini"\. Known: claude, codex/)
-  refused(['claude', '--step', 'flow.md#9', '--send', 'x=1'], /no heading numbered 9/)
+  refused(['claude', '--step', 'flow.md#9', '--send', 'x=1'], /no heading numbered or named "9"/)
   const help = r('--help'); assert.equal(help.status, 0); assert.match(help.stdout, /sil run claude --step flow\.md#1/); assert.match(help.stdout, /enforcement: os-sandbox/); assert.match(help.stdout, /--keep-session/)
   const codex = r('codex', ...ok.slice(1, 7), '-m', 'gpt-5.4-mini', '-s', 'read-only', '--dry-run')
   assert.equal(codex.stdout.trim(), 'codex exec --json --skip-git-repo-check - -m gpt-5.4-mini -s read-only < <prompt>')
@@ -290,6 +290,32 @@ test('run: the subagent starts in the project root — links in the called docum
   assert.doesNotMatch(p.stdout, /\.\.\//, 'nothing in the prompt climbs out of the root')
   const bad = r('--send', 'topic=nope', '--send', 'spec=../docs/spec.json', '--prompt-only')
   assert.equal(bad.status, 1); assert.match(bad.stderr, /links \.\.\/references\/\{\{>topic\}\}\.md, which becomes flows\/references\/nope\.md with the values sent, but no file exists there/)
+  rmSync(d, { recursive: true, force: true })
+})
+
+test('run: a {{>name}} only in the call target chooses the file — sent with --send, one name part, not passed on; a step is found by number, anchor or name', () => {
+  const d = resolve(tmpdir(), `sil-run-track-${process.pid}`); rmSync(d, { recursive: true, force: true })
+  for (const sub of ['.sil', 'agents']) mkdirSync(resolve(d, sub), { recursive: true })
+  writeFileSync(resolve(d, 'flow.md'), '# 지원\n\n## {{>입력}}\n- track\n- posting\n\n## 1. 준비\n공고를 읽는다.\n\n## 2. 조립 ((서브에이전트로, sil run)) {#assemble}\n[조립자](agents/{{>track}}-composer.md) 를 {{>posting}} 와 함께 부르고 {{<draft}} 를 받는다.\n\n## 3. 이력서 심사 ((서브에이전트로, sil run))\n[심사](agents/{{>track}}-composer.md) 를 {{>track}} 와 {{>posting}} 와 함께 부르고 {{<verdict}} 를 받는다.\n\n## 4. 조립 ((서브에이전트로, sil run))\n[조립자](agents/resume-composer.md) 를 {{>posting}} 와 함께 부르고 {{<draft}} 를 받는다.\n')
+  writeFileSync(resolve(d, 'agents/resume-composer.md'), '# 이력서 조립자\n\nRESUME-BODY\n\n## {{>입력}}\n- posting\n\n## {{<출력}}\n- draft\n')
+  writeFileSync(resolve(d, 'agents/portfolio-composer.md'), '# 포트폴리오 조립자\n\nPORTFOLIO-BODY\n\n## {{>입력}}\n- posting\n\n## {{<출력}}\n- draft\n')
+  const r = (...a: string[]) => spawnSync(process.execPath, ['--experimental-strip-types', MAIN, 'run', 'claude', ...a, '--prompt-only'], { encoding: 'utf8', cwd: d })
+  const p = r('--step', 'flow.md#2', '--send', 'track=portfolio', '--send', 'posting=backend')
+  assert.equal(p.status, 0, p.stderr)
+  assert.match(p.stdout, /PORTFOLIO-BODY/, 'track fills the call target, so the portfolio composer is called')
+  assert.match(p.stdout, /## Values for this run\n- posting:\nbackend\n\n## Reply format/, 'track chose the file and is not passed to the called document')
+  assert.match(r('--step', 'flow.md#2', '--send', 'track=resume', '--send', 'posting=x').stdout, /RESUME-BODY/)
+  const refused = (args: string[], re: RegExp) => { const x = r(...args); assert.equal(x.status, 1, args.join(' ')); assert.match(x.stderr, re) }
+  refused(['--step', 'flow.md#2', '--send', 'posting=x'], /expects --send for: posting track\. Got: posting/)
+  refused(['--step', 'flow.md#2', '--send', 'track=../agents/resume', '--send', 'posting=x'], /one file name part/)
+  refused(['--step', 'flow.md#2', '--send', 'track=nope', '--send', 'posting=x'], /called file not found/)
+  // A name on the call line as well: it chooses the file and is passed on
+  assert.match(r('--step', 'flow.md#3', '--send', 'track=resume', '--send', 'posting=x').stdout, /- track:\nresume\n- posting:\nx|- posting:\nx\n- track:\nresume/)
+  // The step by its anchor, by its name (as written or as a slug); a name on two headings is refused
+  for (const s of ['flow.md#assemble']) assert.match(r('--step', s, '--send', 'track=resume', '--send', 'posting=x').stdout, /RESUME-BODY/, s)
+  for (const s of ['flow.md#이력서 심사', 'flow.md#이력서-심사']) assert.equal(r('--step', s, '--send', 'track=resume', '--send', 'posting=x').status, 0, s)
+  refused(['--step', 'flow.md#조립', '--send', 'posting=x'], /"조립" matches more than one heading: "2\. 조립" \(line \d+\), "4\. 조립"/)
+  refused(['--step', 'flow.md#입력', '--send', 'posting=x'], /no heading numbered or named "입력"/)
   rmSync(d, { recursive: true, force: true })
 })
 

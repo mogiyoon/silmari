@@ -181,6 +181,7 @@ export function parseDoc(rel: string, src: string): Doc {
       const hrange = { start: B(n.position!.start.offset!), end: B(n.position!.end.offset!) }
       let text = raw
       const a = ANCHOR.exec(text); if (a) { doc.anchors.add(a[1]); text = text.slice(0, a.index).trim() }
+      const anchor = a ? a[1].trim() : undefined
       let sub = SUBAGENT.test(text)
       let clean = text.replace(SUBAGENT, '').trim()
       if (!sub) {
@@ -219,7 +220,7 @@ export function parseDoc(rel: string, src: string): Doc {
       const iso = sub || (stack.length ? stack[stack.length - 1].iso : false)
       const executionSection = execution ? L(n) : (stack.length ? stack[stack.length - 1].execution : null)
       stack.push({ level: n.depth, text: clean, iso, execution: executionSection })
-      doc.headings.push({ level: n.depth, text: clean, line: L(n), subagent: sub, body: '', range: { start: 0, end: 0 }, ...(contract ? { contract } : {}), ...(execution ? { execution: true as const } : {}) })
+      doc.headings.push({ level: n.depth, text: clean, line: L(n), subagent: sub, body: '', range: { start: 0, end: 0 }, ...(contract ? { contract } : {}), ...(execution ? { execution: true as const } : {}), ...(anchor ? { anchor } : {}) })
       if (n.depth === 1) { h1s++; if (doc.title === null) doc.title = clean }
       if ([...inline(n.children)].some((c) => c.type === 'link' || c.type === 'linkReference'))
         doc.diags.push({ code: 'L-N05', severity: 'info', where: `${rel}:${L(n)}`, message: `A link inside a heading is not an edge: ${clean}` })

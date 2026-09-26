@@ -443,7 +443,8 @@
           "range": {
             "start": 42,
             "end": 142
-          }
+          },
+          "anchor": "layers"
         },
         {
           "level": 2,
@@ -454,7 +455,8 @@
           "range": {
             "start": 177,
             "end": 245
-          }
+          },
+          "anchor": "extension"
         }
       ],
       "contract": null,

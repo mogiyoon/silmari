@@ -77,12 +77,13 @@ Eight symbols. The words inside them are free, in any language.
 
 1. If the calling heading ends with a \`(( ))\` label, do not start the subagent yourself. Run with your shell:
    \`sil run <runtime> --step <flow file>#<heading number> --send <name>=<value> … <runtime flags>\`
+   The step can also be the heading's anchor or its name without the number: \`#assemble\` for \`## 2. 조립 ((…)) {#assemble}\`, or \`#조립\`. A script outside the flow should call the anchor, which stays when the heading is renumbered or renamed.
    where \`<runtime>\` is the CLI you are running in, and \`<runtime flags>\` are that CLI's own flags that apply the model named by \`{{#…}}\` and restrict the tools to those named by \`{{+…}}\`. For claude: \`--model <name> --tools <Tool,Tool>\`. For codex: \`-m <name> -s <sandbox>\`. Example:
    \`sil run claude --step flow.md#1 --send posting=@posting.md --model haiku --tools Read\`
    Use the JSON it prints as the received values. \`sil run --help\` lists the runtimes and their flags.
    \`{{-…}}\` on the call line needs no flag of yours: \`sil run\` adds the runtime's own switch for the project start files.
 2. If the heading has no \`(( ))\` label, read the called file and follow its steps yourself. Tools and model do not apply; you keep your own.
-3. Values on the call line (\`{{>name}}\`) exist only for this run. Fill them in and pass each one with \`--send name=…\`. The hint on that name in the called document's \`{{>…}}\` list says what to send, and \`sil run\` checks it before anything starts:
+3. Values on the call line (\`{{>name}}\`) exist only for this run. Fill them in and pass each one with \`--send name=…\`. A \`{{>name}}\` inside the call's link target is sent the same way: \`[조립자](agents/{{>track}}-composer.md)\` needs \`--send track=resume\`. It only chooses the file and is not passed to the called document. The hint on that name in the called document's \`{{>…}}\` list says what to send, and \`sil run\` checks it before anything starts:
    - No hint, or \`(text)\`: the value itself. \`--send tone=formal\`, or \`--send note=@memo.md\` to send a file's content (an @file path is read from the folder you run sil in). Nothing is checked. The subagent sees the text either way and cannot tell the two apart.
    - \`(json)\`: a JSON string, typed or from a file. \`--send options='{"depth": 2}'\` or \`--send options=@options.json\`. Refused when it does not parse. Windows PowerShell 5 loses the double quotes inside an argument, so send JSON from a file there.
    - \`(path)\`: the path itself, relative to the flow file's folder. \`--send spec=docs/design.md\`, never \`@\`. Refused when nothing exists there. Only the path reaches the prompt; the subagent opens it with its own tools, so the call line needs \`{{+read}}\` or wider.
