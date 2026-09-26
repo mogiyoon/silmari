@@ -24,7 +24,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, createWriteStream, readdirSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, resolve, relative, join, sep } from 'node:path'
-import { parseDoc, findProjectRoot, readConfig, resolve as resolveLink, type Link, type Doc } from '@silmari/core/node'
+import { parseDoc, findProjectRoot, readConfig, slug, resolve as resolveLink, type Link, type Doc } from '@silmari/core/node'
 import { findExecutable, commandLine, starts, stopTree } from './spawn.ts'
 
 /** What sil has to know about one runtime CLI. Everything else about the command line belongs to the caller. */
@@ -101,11 +101,13 @@ export const ADAPTERS: Record<string, Adapter> = {
   },
 }
 
-export const runUsage = (): string => `sil run <runtime> --step <flow.md>#<N> --send <name>=<value> … [runtime flags]
+export const runUsage = (): string => `sil run <runtime> --step <flow.md>#<step> --send <name>=<value> … [runtime flags]
 
-  Starts step N of the flow as a subagent through that runtime's CLI. sil reads --step and --send; every other argument
+  Starts one step of the flow as a subagent through that runtime's CLI. <step> is the heading's number (#2), its anchor (#assemble for
+  ## 2. 조립 ((…)) {#assemble}), or its name without the number (#조립). A script that calls a step from outside the flow should use the
+  anchor: it stays when the heading is renumbered or renamed. sil reads --step and --send; every other argument
   goes to the runtime unchanged. Put the model named by {{#…}} and the tools named by {{+…}} in the runtime's own flags.
-    --send name=value      a value for a {{>name}} on the call line        --send name=@file   a file's content (path from the current folder)
+    --send name=value      a value for a {{>name}} on the call line or in its link target        --send name=@file   a file's content (path from the current folder)
     --dry-run              print the command that would run, and stop      --prompt-only       print the assembled prompt
     --keep-session         let the runtime save this run as a session you can resume (off by default: sil keeps its own record)
     --no-keep-session      do not, even when .sil/config.yaml says run: keep_session: true (that key keeps them for the whole project)
@@ -118,6 +120,8 @@ export const runUsage = (): string => `sil run <runtime> --step <flow.md>#<N> --
   Windows PowerShell 5 drops the double quotes inside an argument on its way to a program: send JSON there as @file.
   The subagent starts in the project root (the folder with .sil/). Links in the called document and (path) values are rewritten
   to that root, so the paths it opens are the ones the document meant. {{>name}} inside a link target is filled from --send.
+  A name only in the call line's target chooses the file ([조립자](agents/{{>track}}-composer.md) with --send track=resume) and is not
+  passed to the called document; it is one file name part, so no / or \\.
   The prompt reaches the runtime on stdin, so a long one is not cut by a command-line limit.
 
   Project rules. The subagent keeps the runtime's project start files (CLAUDE.md · AGENTS.md · …), as people expect. To run a
@@ -141,10 +145,26 @@ const flagValue = (args: string[], flags: string[]): string | undefined => {
 const installedRuntimes = () => Object.entries(ADAPTERS).filter(([, a]) => { const f = findExecutable(a.exe); return f !== null && starts(f) }).map(([n]) => n).join(', ') || 'none'
 const fill = (s: string, sends: Map<string, { value: string }>) => s.replace(/\{\{>([^}]*)\}\}/g, (m, n: string) => sends.get(n.trim())?.value ?? m)
 
-/** Finds the call line of step N: the first link under the heading whose text starts with `N.` (or equals N) */
+/** A step heading without its number: `2. 조립` → `조립` */
+const stepName = (text: string) => text.replace(/^\d+(\.\d+)*\.\s*/, '').trim()
+
+/** Finds the call line of a step: the first link under its heading. The step is, in this order: the number (`N.` at the start of the heading),
+ *  the heading's own anchor (`## 2. 조립 ((…)) {#assemble}` → `assemble`), or the heading's name without the number, as written or as its slug
+ *  (`#이력서 심사` · `#이력서-심사`). A number was the only address before, and a script that called a step from outside the flow broke when
+ *  steps were renumbered (2026-09-26). A name survives renumbering; an anchor survives renaming too */
 function findStep(doc: Doc, step: string): { heading: string; link: Link } | string {
-  const h = doc.headings.find((x) => new RegExp(`^${step.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.(\\s|$)`).test(x.text) || x.text === step)
-  if (!h) return `no heading numbered ${step} in the flow file`
+  const numbered = new RegExp(`^${step.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.(\\s|$)`)
+  // A contract heading (`## {{>입력}}`) is not a step
+  const steps = doc.headings.filter((x) => !x.contract)
+  let hs = steps.filter((x) => numbered.test(x.text) || x.text === step)
+  if (!hs.length) hs = steps.filter((x) => x.anchor === step)
+  if (!hs.length) {
+    const want = step.trim(), wantSlug = slug(want)
+    hs = steps.filter((x) => stepName(x.text) === want || slug(stepName(x.text)) === wantSlug)
+  }
+  if (!hs.length) return `no heading numbered or named "${step}" in the flow file`
+  if (hs.length > 1) return `"${step}" matches more than one heading: ${hs.map((x) => `"${x.text}" (line ${x.line})`).join(', ')}. Use the number, or rename one`
+  const h = hs[0]
   const link = doc.links.find((l) => l.under[l.under.length - 1] === h.text) ?? doc.links.find((l) => l.under.includes(h.text))
   if (!link) return `no call line (a markdown link) under step ${step} "${h.text}"`
   return { heading: h.text, link }
@@ -174,7 +194,7 @@ export async function run(argv: string[]): Promise<number> {
     if (a === '--keep-session' || a === '--no-keep-session') { keepFlag = a === '--keep-session'; continue }
     rest.push(a)
   }
-  if (!step || !step.includes('#')) return fail('--step <flow.md>#<N> is required')
+  if (!step || !step.includes('#')) return fail('--step <flow.md>#<step> is required: the heading number, its {#anchor}, or its name')
   const [flowPath, num] = [step.slice(0, step.lastIndexOf('#')), step.slice(step.lastIndexOf('#') + 1)]
   const flowAbs = resolve(flowPath)
   if (!existsSync(flowAbs)) return fail(`flow file not found: ${flowPath}`)
@@ -184,9 +204,15 @@ export async function run(argv: string[]): Promise<number> {
   if (typeof found === 'string') return fail(found)
   const { heading, link } = found
   if (!link.isolated) return fail(`step ${num} "${heading}" is not a subagent step: its heading has no (( )) label. Do this step yourself.`)
-  // --send names must be exactly the {{>…}} names on the call line
-  const expected = [...new Set(link.sends)].sort(), got = [...sends.keys()].sort()
+  // --send names must be exactly the {{>…}} names on the call line and in its link target. A name in the target only chooses the file:
+  // `[조립자](agents/{{>track}}-composer.md)` needs --send track=resume. Before, only the call line counted, so that value was refused and the
+  // target stayed unfilled; the workaround sent track on to the called document as well (2026-09-26)
+  const expected = [...new Set([...link.sends, ...link.params])].sort(), got = [...sends.keys()].sort()
   if (expected.join('\0') !== got.join('\0')) return fail(`step ${num} expects --send for: ${expected.join(' ') || 'nothing'}. Got: ${got.join(' ') || 'none'}.`)
+  // A value in the target stands for one path segment, as lint matches it
+  for (const n of link.params) { const v = sends.get(n)!.value; if (/[\\/]/.test(v) || v === '.' || v === '..') return fail(`${n} is filled into the link target ${link.target}, so it is one file name part: no / or \\, not . or .. (got: ${v})`) }
+  // What the called document receives: the values on the call line. A name only in the target was for choosing the file
+  const passed = new Map([...sends].filter(([k]) => link.sends.includes(k)))
   // The call line declares tools or a model: the runtime flag must be there. Presence only; the words inside {{ }} are for the orchestrator
   for (const [f, why] of Object.entries(ad.rejected)) if (hasFlag(rest, [f])) return fail(`${f} ${why}`)
   if (link.tools.length && !hasFlag(rest, ad.toolsFlags)) return fail(`the call line declares tools {{+${link.tools.join('}} {{+')}}} but no tools flag was given for ${rt} (${ad.toolsFlags.join(' / ')}).`)
@@ -207,7 +233,7 @@ export async function run(argv: string[]): Promise<number> {
   const targetRel = fromRoot(targetAbs)
   const src = readFileSync(targetAbs, 'utf8')
   const target = parseDoc(targetRel, src)
-  for (const [k, s] of sends) {
+  for (const [k, s] of passed) {
     const t = target.contractTypes[k]
     if (t === 'path') {
       if (s.fromFile) return fail(`${k} is a (path) input: pass the path itself (--send ${k}=some/file), not @file`)
@@ -216,7 +242,7 @@ export async function run(argv: string[]): Promise<number> {
     if (t === 'json') { try { JSON.parse(s.value) } catch { return fail(`${k} is a (json) input but the value is not valid JSON`) } }
   }
   // Links in the called document are relative to that document. Rewrite each target from the root, filling {{>name}} from --send
-  const rewritten = rewriteLinks(src, target, sends, (rel) => existsSync(join(root, rel)))
+  const rewritten = rewriteLinks(src, target, passed, (rel) => existsSync(join(root, rel)))
   for (const m of rewritten.missing) {
     if (m.filled) return fail(`${targetRel}:${m.line} links ${m.target}, which becomes ${m.rel} with the values sent, but no file exists there`)
     process.stderr.write(`sil run: warning: ${targetRel}:${m.line} links ${m.target}, but ${m.rel} does not exist (sil lint reports this as L-N01)\n`)
@@ -230,7 +256,7 @@ export async function run(argv: string[]): Promise<number> {
   const prompt = [
     opening,
     '', body, '', '## Values for this run',
-    ...[...sends].map(([k, s]) => `- ${k}:\n${shownValue(k, s)}`),
+    ...[...passed].map(([k, s]) => `- ${k}:\n${shownValue(k, s)}`),
     '', '## Reply format', `Reply with only a JSON object whose keys are: ${link.returns.join(', ') || 'result'}`, '',
   ].join('\n')
   if (promptOnly) { process.stdout.write(prompt); return 0 }
@@ -241,7 +267,7 @@ export async function run(argv: string[]): Promise<number> {
   // changed must miss the cache; before, only the called document's hash was in the key (2026-09-15)
   const runDir = join(root, '.sil', 'run'); mkdirSync(join(runDir, 'cache'), { recursive: true })
   const pointed = [...new Set([
-    ...[...sends].filter(([k]) => target.contractTypes[k] === 'path').map(([, s]) => resolve(flowDir, s.value)),
+    ...[...passed].filter(([k]) => target.contractTypes[k] === 'path').map(([, s]) => resolve(flowDir, s.value)),
     ...rewritten.linked.map((rel) => join(root, rel)),
   ])].sort()
   const key = createHash('sha1').update(JSON.stringify([rt, args, prompt, pointed.map((p) => [fromRoot(p), fingerprint(p)])])).digest('hex').slice(0, 16)
@@ -253,7 +279,7 @@ export async function run(argv: string[]): Promise<number> {
   const exe = findExecutable(ad.exe)
   if (!exe) return fail(`${ad.exe} was not found on PATH. Installed runtimes: ${installedRuntimes()}`)
   if (!starts(exe)) return fail(`${exe} is on PATH but "${ad.exe} --version" did not exit 0. Installed runtimes: ${installedRuntimes()}`)
-  const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-step${num}`
+  const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-step${num.replace(/[^\p{L}\p{N}_-]+/gu, '-')}`
   mkdirSync(join(runDir, id), { recursive: true })
   const streamFile = createWriteStream(join(runDir, id, 'stream.jsonl'))
   const c = commandLine(exe, args)

@@ -18,6 +18,8 @@ export interface Heading {
   contract?: 'in' | 'out'
   /** Set when the whole heading is `{{=…}}`. The first link in its section is an execution target. */
   execution?: true
+  /** The heading's own anchor, `## 2. 조립 {#assemble}`, without the braces. It stays when the heading is renamed or renumbered. */
+  anchor?: string
 }
 
 /** A type hint on a contract item: `- marker (path) — …`. `path` values are checked for existence by `sil run`; `json` must parse; `text` (the default) is not checked. */
