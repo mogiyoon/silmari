@@ -3,7 +3,7 @@
 //   sil run <runtime> --step <flow.md>#<N> --send name=value [--send name=@file] … [flags of that runtime]
 //
 // The orchestrator (an AI reading the flow document) types this line. It translates the call line's {{#model}} and {{+tools}} into
-// the runtime's own flags itself; sil reads only --step and --send and passes everything else through untouched. What sil adds:
+// the runtime's own flags itself; sil reads --step and --send and validates runtime flags before forwarding them. What sil adds:
 //   · the checks a program can do without understanding prose: the heading has a (( )) label, the --send names match the {{>…}} names,
 //     a flag is present when the call line declares tools or a model, a flag that does not restrict is refused, `(path)` values exist
 //   · the prompt: the called document's body, the values, and the reply format ({"<received name>": …})
@@ -17,7 +17,7 @@
 //   · a record of every run under .sil/run/, and a cached answer for an identical repeat: the same arguments and prompt, and the same content
 //     in every file the prompt points at. A run that failed is recorded but never cached
 // Measured on Claude Code and Codex CLI (2026-09-07): orchestrators typed the line correctly in every run once the Running section
-// showed the runtime's flags; without the examples they guessed --allowedTools, which does not restrict, hence the refusal list.
+// showed the runtime's flags; --allowedTools approves permissions separately and never substitutes for --tools.
 // The prompt goes to the runtime on stdin, never on the command line: Windows caps a command line at 32,767 characters (8,191 through
 // cmd.exe), and one document body with a file sent as @file passes that. The runtime is found and started by spawn.ts (2026-09-15)
 import { spawn } from 'node:child_process'
@@ -26,6 +26,24 @@ import { createHash } from 'node:crypto'
 import { dirname, resolve, relative, join, sep } from 'node:path'
 import { parseDoc, findProjectRoot, readConfig, slug, resolve as resolveLink, type Link, type Doc } from '@silmari/core/node'
 import { findExecutable, commandLine, starts, stopTree } from './spawn.ts'
+
+export interface PermissionDenial { tool: string; command?: string; toolUseId?: string }
+interface ToolCall { id: string; tool: string; command?: string }
+const record = (v: unknown): Record<string, unknown> => v !== null && typeof v === 'object' ? v as Record<string, unknown> : {}
+const denial = (v: unknown): PermissionDenial => {
+  const d = record(v), input = record(d.tool_input ?? d.input)
+  return { tool: String(d.tool_name ?? d.name ?? 'unknown tool'), ...(typeof input.command === 'string' ? { command: input.command } : {}), ...(typeof d.tool_use_id === 'string' ? { toolUseId: d.tool_use_id } : {}) }
+}
+// Read only tool/runtime error text, never the worker's prose report. An ordinary command failure is not an approval denial.
+const DENIAL_MESSAGES = [
+  /\b(?:permission|approval)(?:[ _-](?:request|was|has|been|is))*[ _-](?:denied|denial|rejected|required)\b/i,
+  /permissions? to use .{0,120}(?:denied|not|haven't)/i,
+  /(?:denied|requires?|needs?) (?:[\w-]+ )?(?:tool )?(?:permission|approval)/i,
+  /not (?:allowed|authorized) to (?:use|execute|run)|tool use (?:was )?rejected/i,
+  /(?:command|tool).*rejected.*(?:user|policy)|(?:user|policy).*rejected.*(?:command|tool)/i,
+  /sandbox[ _]?(?:restriction|denied)/i,
+]
+const permissionDenied = (s: string) => DENIAL_MESSAGES.some((re) => re.test(s))
 
 /** What sil has to know about one runtime CLI. Everything else about the command line belongs to the caller. */
 export interface Adapter {
@@ -51,7 +69,7 @@ export interface Adapter {
   /** One example line for --help and for the Running section of SILMARI.md */
   example: string
   /** Reads one output event. Returns what it found; fields it cannot know stay undefined. `error` is set when the runtime says the run failed */
-  read: (ev: Record<string, unknown>) => { tools?: string[]; model?: string; used?: string[]; result?: string; error?: string }
+  read: (ev: Record<string, unknown>) => { tools?: string[]; model?: string; used?: string[]; result?: string; error?: string; calls?: ToolCall[]; denied?: PermissionDenial[] }
 }
 
 export const ADAPTERS: Record<string, Adapter> = {
@@ -63,15 +81,18 @@ export const ADAPTERS: Record<string, Adapter> = {
     // --no-session-persistence: works only with -p, which sil always passes. Without it every step lands in ~/.claude/projects/
     sessionOffFlags: ['--no-session-persistence'],
     toolsFlags: ['--tools', '--disallowedTools', '--disallowed-tools'], modelFlags: ['--model'],
-    rejected: { '--allowedTools': 'does not restrict tools; it only pre-approves permissions. Use --tools <Tool,Tool>.', '--allowed-tools': 'does not restrict tools; it only pre-approves permissions. Use --tools <Tool,Tool>.' },
+    rejected: { '--dangerously-skip-permissions': 'bypasses all approvals; use {{!…}} and scoped --allowedTools rules instead.', '--allow-dangerously-skip-permissions': 'enables bypassing all approvals; use {{!…}} and scoped --allowedTools rules instead.' },
     enforcement: 'tool-removal', verifies: true,
     example: 'sil run claude --step flow.md#1 --send posting=@posting.md --model haiku --tools Read,Bash',
     read: (ev) => {
       const out: ReturnType<Adapter['read']> = {}
-      const msg = ev.message as { model?: string; content?: { type: string; name?: string }[] } | undefined
+      const msg = ev.message as { model?: string; content?: { type: string; name?: string; id?: string; input?: unknown; tool_use_id?: string; is_error?: boolean; content?: unknown }[] } | undefined
       if (ev.type === 'system' && ev.subtype === 'init') out.tools = (ev.tools as string[]) ?? []
       if (ev.type === 'assistant' && msg) { out.model = msg.model; out.used = (msg.content ?? []).filter((c) => c.type === 'tool_use').map((c) => c.name ?? '?') }
+      if (ev.type === 'assistant' && msg) out.calls = (msg.content ?? []).filter((c) => c.type === 'tool_use').map((c) => ({ id: c.id ?? '', tool: c.name ?? '?', command: typeof record(c.input).command === 'string' ? record(c.input).command as string : undefined }))
+      if (ev.type === 'user' && msg) out.denied = (msg.content ?? []).filter((c) => c.type === 'tool_result' && c.is_error && permissionDenied(JSON.stringify(c.content))).map((c) => ({ tool: 'unknown tool', toolUseId: c.tool_use_id }))
       if (ev.type === 'result') {
+        if (Array.isArray(ev.permission_denials)) out.denied = ev.permission_denials.map(denial)
         if (typeof ev.result === 'string') out.result = ev.result
         // An error result (max turns, an API error) may carry no text. It used to become an empty answer, cached and replayed (2026-09-15)
         if (ev.is_error === true || (typeof ev.subtype === 'string' && ev.subtype !== 'success')) out.error = [String(ev.subtype ?? 'error'), typeof ev.result === 'string' ? ev.result : ''].filter(Boolean).join(': ').slice(0, 300)
@@ -92,9 +113,14 @@ export const ADAPTERS: Record<string, Adapter> = {
     example: 'sil run codex --step flow.md#1 --send posting=@posting.md -m gpt-5.4-mini -s read-only',
     read: (ev) => {
       const out: ReturnType<Adapter['read']> = {}
-      const item = ev.item as { type?: string; text?: string } | undefined
+      const item = ev.item as { type?: string; text?: string; command?: string; status?: string; exit_code?: number; aggregated_output?: string; error?: unknown } | undefined
       if (ev.type === 'item.completed' && item?.type === 'agent_message') out.result = item.text ?? ''
       if (ev.type === 'item.completed' && item?.type === 'command_execution') out.used = ['shell']
+      if (ev.type === 'item.completed' && item?.type === 'command_execution') {
+        const failed = item.status === 'failed' || (item.exit_code !== undefined && item.exit_code !== 0) || item.error !== undefined
+        if (item.status === 'denied' || item.status === 'declined' || (failed && permissionDenied(`${item.aggregated_output ?? ''} ${JSON.stringify(item.error ?? '')}`))) out.denied = [{ tool: 'shell', command: item.command }]
+      }
+      if (ev.type === 'turn.failed' && permissionDenied(JSON.stringify(ev.error))) out.denied = [{ tool: 'shell' }]
       if (ev.type === 'turn.failed') out.error = String((ev.error as { message?: string } | undefined)?.message ?? 'turn failed').slice(0, 300)
       return out
     },
@@ -131,15 +157,39 @@ export const runUsage = (): string => `sil run <runtime> --step <flow.md>#<step>
   An identical repeat (same arguments and prompt, same content in every linked file and (path) value) is answered from .sil/run/cache.
   A run that fails is recorded under .sil/run/ and not cached.
 
-  Runtimes and the flags that restrict tools (a flag that only pre-approves permissions is refused):
+  Command approvals. Write {{!…}} after the call link in the same paragraph as {{+…}} / {{#…}}, in your own words.
+  Translate them separately into Claude --allowedTools "Bash(python:*)" "Bash(git status:*)" (alias --allowed-tools).
+  Approval flags require a declaration, and a declaration requires approval rules. They never replace --tools.
+  sil checks presence; the orchestrator matches the words to rule scopes. Without a declaration sil pre-approves nothing;
+  existing runtime permission settings still apply. Codex refuses {{!…}}: -a / --ask-for-approval and -s / --sandbox
+  cannot enforce command-level approvals. Permission denials in runtime events fail the run, regardless of the worker's report,
+  are listed in stderr and .sil/run/, and are never cached. The first line and record show approved: […] or approved: none.
+  Claude --tools automatically adds --strict-mcp-config: inherited MCP servers are excluded. Explicit --mcp-config remains checked.
+
+  Runtimes and the flags that restrict tools (approval flags never count as tool limits):
 ${Object.entries(ADAPTERS).map(([n, a]) => `    ${n.padEnd(8)} ${a.example}\n${''.padEnd(13)}tools: ${a.toolsFlags.join(' / ')} · model: ${a.modelFlags.join(' / ')} · enforcement: ${a.enforcement} · ${a.verifies ? 'verified from the output' : 'not verifiable from the output'} · {{-…}}: ${a.noRulesFlags.length ? a.noRulesFlags.join(' ') : 'not supported'} · no session: ${a.sessionOffFlags?.length ? a.sessionOffFlags.join(' ') : 'not supported'}`).join('\n')}
 `
 
 const fail = (msg: string): number => { process.stderr.write(`sil run: ${msg}\n`); return 1 }
 const hasFlag = (args: string[], flags: string[]) => args.some((a) => flags.some((f) => a === f || a.startsWith(f + '=')))
-const flagValue = (args: string[], flags: string[]): string | undefined => {
-  for (let i = 0; i < args.length; i++) for (const f of flags) { if (args[i] === f) return args[i + 1]; if (args[i].startsWith(f + '=')) return args[i].slice(f.length + 1) }
-  return undefined
+/** Variadic CLI options, preserving spaces inside rules such as Bash(git status:*). Split commas/spaces only outside parentheses. */
+const flagValues = (args: string[], flags: string[]): string[] => {
+  const values: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const f = flags.find((f) => args[i] === f || args[i].startsWith(f + '='))
+    if (!f) continue
+    if (args[i] !== f) values.push(args[i].slice(f.length + 1))
+    else while (i + 1 < args.length && !args[i + 1].startsWith('-')) values.push(args[++i])
+  }
+  return values.flatMap((v) => {
+    let depth = 0, start = 0; const parts: string[] = []
+    for (let i = 0; i < v.length; i++) {
+      if (v[i] === '(') depth++
+      if (v[i] === ')') depth--
+      if (depth === 0 && /[,\s]/.test(v[i])) { parts.push(v.slice(start, i)); start = i + 1 }
+    }
+    parts.push(v.slice(start)); return parts.map((p) => p.trim()).filter(Boolean)
+  })
 }
 /** The runtimes that are on PATH and start */
 const installedRuntimes = () => Object.entries(ADAPTERS).filter(([, a]) => { const f = findExecutable(a.exe); return f !== null && starts(f) }).map(([n]) => n).join(', ') || 'none'
@@ -213,6 +263,16 @@ export async function run(argv: string[]): Promise<number> {
   for (const n of link.params) { const v = sends.get(n)!.value; if (/[\\/]/.test(v) || v === '.' || v === '..') return fail(`${n} is filled into the link target ${link.target}, so it is one file name part: no / or \\, not . or .. (got: ${v})`) }
   // What the called document receives: the values on the call line. A name only in the target was for choosing the file
   const passed = new Map([...sends].filter(([k]) => link.sends.includes(k)))
+  const approvalFlags = ['--allowedTools', '--allowed-tools']
+  const approved = rt === 'claude' ? flagValues(rest, approvalFlags) : []
+  if (rt === 'claude' && hasFlag(rest, approvalFlags) && !link.approvals.length)
+    return fail(`${rest.find((a) => approvalFlags.some((f) => a === f || a.startsWith(f + '=')))!.split('=')[0]} does not restrict tools; it only pre-approves permissions. A {{!…}} declaration on this call is required; use --tools <Tool,Tool> for tool limits.`)
+  if (link.approvals.length) {
+    if (rt === 'codex') return fail(`the call declares approvals {{!${link.approvals.join('}} {{!')}}}, but codex exec cannot enforce a per-command approval allowlist through -a / --ask-for-approval and -s / --sandbox. These set a session policy and filesystem access, not command approvals. This step was not started; use claude or remove the declaration.`)
+    if (!approved.length) return fail('the call declares {{!…}} approvals but no approval rules were given. Translate them into --allowedTools <rule> …; approvals do not replace --tools.')
+  }
+  if (rt === 'claude' && flagValues(rest, ['--permission-mode']).includes('bypassPermissions')) return fail('--permission-mode bypassPermissions bypasses all approvals; use {{!…}} and scoped --allowedTools rules instead.')
+  if (rt === 'codex' && hasFlag(rest, ['-a', '--ask-for-approval', '--full-auto', '--yolo', '--dangerously-bypass-approvals-and-sandbox'])) return fail('approval policy flags require {{!…}}, which codex exec cannot enforce per command. Use -s / --sandbox for tool limits.')
   // The call line declares tools or a model: the runtime flag must be there. Presence only; the words inside {{ }} are for the orchestrator
   for (const [f, why] of Object.entries(ad.rejected)) if (hasFlag(rest, [f])) return fail(`${f} ${why}`)
   if (link.tools.length && !hasFlag(rest, ad.toolsFlags)) return fail(`the call line declares tools {{+${link.tools.join('}} {{+')}}} but no tools flag was given for ${rt} (${ad.toolsFlags.join(' / ')}).`)
@@ -260,7 +320,9 @@ export async function run(argv: string[]): Promise<number> {
     '', '## Reply format', `Reply with only a JSON object whose keys are: ${link.returns.join(', ') || 'result'}`, '',
   ].join('\n')
   if (promptOnly) { process.stdout.write(prompt); return 0 }
-  const args = [...ad.base.flatMap((x) => (x === '{noRules}' ? (link.noRules ? ad.noRulesFlags : []) : x === '{sessionOff}' ? (keepSession ? [] : ad.sessionOffFlags ?? []) : [x])), ...rest]
+  const strictMcp = rt === 'claude' && hasFlag(rest, ['--tools'])
+  const extra = strictMcp && !hasFlag(rest, ['--strict-mcp-config']) ? ['--strict-mcp-config'] : []
+  const args = [...ad.base.flatMap((x) => (x === '{noRules}' ? (link.noRules ? ad.noRulesFlags : []) : x === '{sessionOff}' ? (keepSession ? [] : ad.sessionOffFlags ?? []) : [x])), ...extra, ...rest]
   if (dry) { process.stdout.write(`${[ad.exe, ...args].join(' ')} < <prompt>\n`); return 0 }
   // Records live under the project's .sil/run/. An identical repeat is answered from the cache: same runtime, arguments and prompt, and the
   // same content in every file the prompt points at. The prompt carries paths, not contents, so a (path) file or a linked document that
@@ -270,11 +332,14 @@ export async function run(argv: string[]): Promise<number> {
     ...[...passed].filter(([k]) => target.contractTypes[k] === 'path').map(([, s]) => resolve(flowDir, s.value)),
     ...rewritten.linked.map((rel) => join(root, rel)),
   ])].sort()
-  const key = createHash('sha1').update(JSON.stringify([rt, args, prompt, pointed.map((p) => [fromRoot(p), fingerprint(p)])])).digest('hex').slice(0, 16)
+  // Version this key when success semantics change: old entries may have cached a report after a permission denial.
+  const key = createHash('sha1').update(JSON.stringify(['permissions-v1', rt, args, link.approvals, prompt, pointed.map((p) => [fromRoot(p), fingerprint(p)])])).digest('hex').slice(0, 16)
   const cachePath = join(runDir, 'cache', `${key}.json`)
   const rules = link.noRules ? `project rules cut ({{-${link.noRules}}})` : 'project start files inherited'
   const session = !ad.sessionOffFlags?.length ? 'session saved by the runtime' : keepSession ? `session kept (${keepFlag ? '--keep-session' : 'run: keep_session in .sil/config.yaml'})` : 'session not saved'
-  process.stderr.write(`→ ${link.target} · ${rt} · ${rest.join(' ') || '(no flags)'} · ${rules} · ${session} · enforcement ${ad.enforcement} · ${ad.verifies ? 'verified from the output' : 'unverified: this runtime does not report the tools or model it used'}\n`)
+  const approvalSummary = `approved: ${approved.length ? JSON.stringify(approved) : 'none'}`
+  const mcpSummary = strictMcp ? 'MCP: --strict-mcp-config (only explicit --mcp-config servers)' : 'MCP: runtime default'
+  process.stderr.write(`→ ${link.target} · ${rt} · ${rest.join(' ') || '(no flags)'} · ${rules} · ${session} · enforcement ${ad.enforcement} · ${ad.verifies ? 'verified from the output' : 'unverified: this runtime does not report the tools or model it used'} · ${approvalSummary} · ${mcpSummary}\n`)
   if (existsSync(cachePath)) { const c = JSON.parse(readFileSync(cachePath, 'utf8')) as { out: unknown; ran: string }; process.stderr.write(`· cached from ${c.ran}; nothing ran\n`); process.stdout.write(JSON.stringify(c.out) + '\n'); return 0 }
   const exe = findExecutable(ad.exe)
   if (!exe) return fail(`${ad.exe} was not found on PATH. Installed runtimes: ${installedRuntimes()}`)
@@ -286,7 +351,9 @@ export async function run(argv: string[]): Promise<number> {
   const child = spawn(c.file, c.args, { ...c.options, cwd: root, env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'CLAUDECODE')) as NodeJS.ProcessEnv, stdio: ['pipe', 'pipe', 'pipe'] })
   let given: string[] | undefined, model: string | undefined, result: string | undefined, error: string | undefined
   const used: string[] = []; let stderr = ''; let aborted: string | null = null; let startError = null as Error | null
-  const wanted = flagValue(rest, ['--tools'])?.split(/[,\s]+/).filter(Boolean)
+  const calls = new Map<string, ToolCall>(), denied: PermissionDenial[] = []
+  const requestedTools = flagValues(rest, ['--tools']).flatMap((t) => t.split(/\s+/))
+  const wanted = hasFlag(rest, ['--tools']) && !requestedTools.includes('default') ? requestedTools : undefined
   // Decoded as UTF-8 across chunks: String(chunk) turned a character split between two chunks into U+FFFD (2026-09-15)
   child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8')
   child.stderr.on('data', (d: string) => { stderr += d })
@@ -294,6 +361,12 @@ export async function run(argv: string[]): Promise<number> {
     streamFile.write(line + '\n')
     let ev: Record<string, unknown>; try { ev = JSON.parse(line) } catch { return }
     const r = ad.read(ev)
+    for (const c of r.calls ?? []) calls.set(c.id, c)
+    for (const d of r.denied ?? []) {
+      const call = d.toolUseId ? calls.get(d.toolUseId) : undefined
+      const entry = { ...d, ...(call ? { tool: call.tool, command: d.command ?? call.command } : {}) }
+      if (!denied.some((x) => x.tool === entry.tool && x.command === entry.command && x.toolUseId === entry.toolUseId)) denied.push(entry)
+    }
     if (r.tools) {
       given = r.tools
       // Claude Code lists the tools it gave the model. If the list is not what --tools asked for, stop before the model does anything
@@ -316,13 +389,14 @@ export async function run(argv: string[]): Promise<number> {
   const code: number = await new Promise((res) => { child.on('close', (x) => res(x ?? 1)); child.on('error', (e) => { startError = e; res(-1) }) })
   if (buf.trim()) onLine(buf)
   streamFile.end()
-  if (startError) return fail(`could not start ${exe}: ${startError.message}`)
-  if (aborted) return fail(aborted)
-  const meta = { runtime: rt, flow: flow.rel, step: num, heading, target: link.target, sends: [...sends.keys()], flags: rest, enforcement: ad.enforcement, verified: ad.verifies && given !== undefined, toolsGiven: given ?? null, model: model ?? null, toolCalls: used, exitCode: code, error: error ?? null, ran: new Date().toISOString() }
+  const denialError = denied.length ? `permission denials: ${denied.map((d) => d.command ? `${d.tool}(${d.command})` : `${d.tool}${d.toolUseId ? ` [${d.toolUseId}]` : ''}`).join('; ')}` : undefined
+  const failure = startError?.message ?? aborted ?? denialError ?? error
+  const exitCode = failure !== undefined || result === undefined ? (code || 1) : code
+  const meta = { runtime: rt, flow: flow.rel, step: num, heading, target: link.target, sends: [...sends.keys()], flags: rest, runtimeArgs: args, approvalDeclarations: link.approvals, approved, permissionDenials: denied, strictMcpConfig: strictMcp || hasFlag(rest, ['--strict-mcp-config']), enforcement: ad.enforcement, verified: ad.verifies && given !== undefined, toolsGiven: given ?? null, model: model ?? null, toolCalls: used, runtimeExitCode: code, exitCode, error: failure ?? null, ran: new Date().toISOString() }
   writeFileSync(join(runDir, id, 'meta.json'), JSON.stringify(meta, null, 2) + '\n')
   // Only a clean run is cached. A failed one would be replayed as "nothing ran" on every retry
-  if (error !== undefined || code !== 0 || result === undefined) {
-    const why = error !== undefined ? `reported an error (${error})` : `exited with code ${code}${result === undefined ? ' and no result' : ''}`
+  if (failure !== undefined || code !== 0 || result === undefined) {
+    const why = failure !== undefined ? `reported an error (${failure})` : `exited with code ${code}${result === undefined ? ' and no result' : ''}`
     return fail(`${rt} ${why}. Not cached; record .sil/run/${id}. ${stderr.trim().slice(0, 400)}`.trim())
   }
   const out = extractJson(result, link.returns)

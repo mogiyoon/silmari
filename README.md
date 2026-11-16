@@ -129,7 +129,7 @@ sil run claude --step flow.md#1 --send target=src/a.ts --model haiku --tools Rea
 
 Steps without a `(( ))` label are ordinary reading. Only labelled steps go through `sil run`, which is where the tools, the model and the project rules are enforced.
 
-## Notation: seven symbols
+## Notation: nine symbols
 <!-- npm -->
 
 A standard Markdown link is an edge. Add values after the link with `{{ }}`. They attach to the preceding link in the same paragraph. Link paths work like imports. `plan.md`, `./plan.md`, and `../agents/plan.md` are relative to the document. A leading `/` (`/agents/plan.md`) starts at the project root, which is the folder containing `.sil/`.
@@ -154,6 +154,7 @@ Call [implement](implement.md) with {{>comments}} and receive {{<changed-files}}
 | `{{>plan}}` | Send a parameter | "Pass this value" |
 | `{{<changed-files}}` | Receive a return value | "Keep this value" |
 | `{{+read}}` | Tools the subagent may use, in your words | "Only these tools" |
+| `{{!git status}}` | Commands this subagent may run without asking, in your words | "Pre-approve these commands" |
 | `{{#fast}}` | Model the subagent runs on, in your words | "This model" |
 | `{{-without the project rules}}` | Run this subagent without the project start files (CLAUDE.md · AGENTS.md · …), in your words | "Ignore the project rules" |
 | `## {{=Run the CLI}}` | The first link in this section is executed, even with no values | "Run this target" |
@@ -255,7 +256,7 @@ silmari does not touch the files. The agent moves the text. `sil lint` checks th
 | L-N18 | warning | Empty marker: `{{>}}`, `{{+}}`, `(())` — nothing can be read from it |
 | L-N20 | warning | A heading starts with a contract marker but contains more text, so it is not a contract heading |
 | L-N21 | warning | Unbalanced parentheses at the end of a heading: a label must be `((…))` |
-| L-N26 | warning | `{{+…}}` / `{{#…}}` / `{{-…}}` on a call outside a subagent step have no effect |
+| L-N26 | warning | `{{+…}}` / `{{#…}}` / `{{-…}}` / `{{!…}}` on a call outside a subagent step have no effect |
 | L-N19 | info | A contract heading is used as H1 |
 | L-N22 | info | The file is called with values but declares no contract, so the names cannot be checked |
 | L-N23 | info | A sent value is neither received from a call nor declared in the document's contract |
@@ -267,6 +268,8 @@ silmari does not touch the files. The agent moves the text. `sil lint` checks th
 | L-N29 | warning | A value inside a link target is neither an input of the document nor received from a call |
 | L-N30 | warning | A link points outside the project root, where a subagent cannot reach it |
 | L-N31 | warning | A `{{=…}}` execution section has no target link |
+| L-N32 | error | `{{!…}}` is attached to a file or reference instead of a subagent call |
+| L-N33 | error | Malformed `{{!…}}` approval marker |
 
 Rules that require a contract or call run only on documents that contain one. Plain Markdown stays quiet. The last line of `sil lint` always shows the type counts (`task 6 · call 7 …`). This makes a migration that changed nothing visible, even at error 0.
 
@@ -282,9 +285,26 @@ sil run codex  --step flow.md#1 --send target=src/a.ts -m gpt-5.4-mini -s read-o
 
 The step after `#` is the heading's number, its anchor, or its name without the number: `flow.md#1`, `flow.md#research` for `## 1. Research ((use a subagent via sil run)) {#research}`, or `flow.md#Research`. A number changes when steps are added or removed, and a name changes when the heading is renamed. A script that calls a step from outside the flow should use the anchor.
 
-`sil` reads only `--step` and `--send`. It passes everything else to the runtime's CLI unchanged. The orchestrator translates `{{#fast}}` and `{{+read}}` into that runtime's flags. `sil run` adds several checks and behaviors. It refuses a step whose heading has no `(( ))`. It refuses `--send` names that differ from the `{{>…}}` names on the call line and in its link target. It refuses a missing tools or model flag when the call line declares one. It refuses a flag that only pre-approves permissions instead of restricting them (`--allowedTools`). It also refuses a value that does not match its hint, such as a missing `(path)`, a `(path)` sent as `@file`, or a `(json)` value that does not parse. See the table under Notation. It builds the prompt from the called document. It starts the subagent in the project root, the folder with `.sil/`, and rewrites every link in the document and every `(path)` value to that root, so the paths the subagent opens are the ones the document meant. A `{{>name}}` inside a link target is filled from `--send`, and the step is refused when that file is missing. A name that appears only in the call's own target, as in `[Composer](agents/{{>track}}-composer.md)`, chooses the file: it takes `--send track=resume` like any other value, must be one file name part, and is not passed to the called document. It leaves the runtime's project start files (CLAUDE.md · AGENTS.md · …) in place, so a rule you wrote there still applies, which is what people expect. When the call line carries `{{-…}}`, it switches them off for that run instead, and the step's rules come only through links; a runtime with no such switch refuses the step rather than running it with the rules still in. The first line of every run says which way it went. It verifies the tool list when the runtime reports it. Claude Code does; Codex does not, and the first line reports that. It returns the `{{<…}}` values as JSON. It sends the prompt on stdin, so a long document is not cut by a command-line length limit (Windows allows 32,767 characters). It records the run under `.sil/run/`, so it tells the runtime not to save one more copy as a session (Claude Code's `--no-session-persistence`); each step would otherwise land in your session list. `--keep-session` keeps the session for one run so you can resume it, `run: keep_session: true` in `.sil/config.yaml` keeps them for the whole project, and `--no-keep-session` turns that off for one run. It returns an identical repeated call from the cache: the same arguments and prompt, and the same content in every linked file and `(path)` value. A failed run is recorded but never cached. Without `sil`, agents use their own subagent feature. The model is applied, but tool limits become a request.
+`sil` reads only `--step` and `--send`. It passes everything else to the runtime's CLI unchanged. The orchestrator translates `{{#fast}}` and `{{+read}}` into that runtime's flags. `sil run` adds several checks and behaviors. It refuses a step whose heading has no `(( ))`. It refuses `--send` names that differ from the `{{>…}}` names on the call line and in its link target. It refuses a missing tools or model flag when the call line declares one. It accepts `--allowedTools` only when the call declares approvals with `{{!…}}`; this flag never satisfies a tool restriction. It also refuses a value that does not match its hint, such as a missing `(path)`, a `(path)` sent as `@file`, or a `(json)` value that does not parse. See the table under Notation. It builds the prompt from the called document. It starts the subagent in the project root, the folder with `.sil/`, and rewrites every link in the document and every `(path)` value to that root, so the paths the subagent opens are the ones the document meant. A `{{>name}}` inside a link target is filled from `--send`, and the step is refused when that file is missing. A name that appears only in the call's own target, as in `[Composer](agents/{{>track}}-composer.md)`, chooses the file: it takes `--send track=resume` like any other value, must be one file name part, and is not passed to the called document. It leaves the runtime's project start files (CLAUDE.md · AGENTS.md · …) in place, so a rule you wrote there still applies, which is what people expect. When the call line carries `{{-…}}`, it switches them off for that run instead, and the step's rules come only through links; a runtime with no such switch refuses the step rather than running it with the rules still in. The first line of every run says which way it went. It verifies the tool list when the runtime reports it. Claude Code does; Codex does not, and the first line reports that. It returns the `{{<…}}` values as JSON. It sends the prompt on stdin, so a long document is not cut by a command-line length limit (Windows allows 32,767 characters). It records the run under `.sil/run/`, so it tells the runtime not to save one more copy as a session (Claude Code's `--no-session-persistence`); each step would otherwise land in your session list. `--keep-session` keeps the session for one run so you can resume it, `run: keep_session: true` in `.sil/config.yaml` keeps them for the whole project, and `--no-keep-session` turns that off for one run. It returns an identical repeated call from the cache: the same arguments and prompt, and the same content in every linked file and `(path)` value. A failed run is recorded but never cached. Without `sil`, agents use their own subagent feature. The model is applied, but tool limits become a request.
 
 Tests used Claude Code (sonnet, haiku) and Codex CLI. Once the Running section showed each runtime's flags, orchestrators typed the line correctly in every run. This included runs with Korean, Japanese and Chinese words inside the markers. With `--tools`, the subagent physically lacked the other tools.
+
+Declare commands this step may run without asking using `{{!…}}` after the call link, in the same paragraph as its tools and model. The words inside are free, in any language. The orchestrator translates them into runtime approval rules, separately from tool limits:
+
+```markdown
+## 1. Check ((use a subagent via sil run))
+Call [Checker](agents/checker.md) and receive {{<report}}.
+Use {{+read}} and {{+bash}} on {{#fast}}, and run without asking {{!project python scripts}} and {{!git status}}.
+```
+
+```sh
+sil run claude --step flow.md#1 --model haiku --tools Read,Bash \
+  --allowedTools "Bash(python:*)" "Bash(git status:*)"
+```
+
+Claude supports these approvals in `-p` mode. `--allowed-tools` is an alias; multiple rules and `--allowedTools=…` also work. A declaration requires approval rules, and approval flags require a declaration. `--allowedTools` cannot replace `--tools`. sil checks the declaration and flags, while the orchestrator is responsible for matching their meaning. Without a declaration sil adds no approvals; existing runtime permission settings still apply. Global project approval defaults are not added. Codex steps carrying `{{!…}}` are refused: `-a` / `--ask-for-approval` and `-s` / `--sandbox` set session and filesystem policies and cannot enforce the declared command scopes.
+
+With Claude `--tools`, sil automatically adds `--strict-mcp-config` so inherited MCP connections cannot add tools. Explicit `--mcp-config` servers are still checked against the requested tool list. The first line shows `approved: […]` or `approved: none` and the MCP policy; `.sil/run/` records the declarations, actual approval rules, runtime arguments and denials. A permission denial in the runtime's events makes sil exit nonzero and skip the cache, even when the worker returns a normal report. Ordinary command errors are not mistaken for approval denials. Run `sil update` in existing projects to refresh SILMARI.md and receive the 0.9.0 guidance note.
 
 ## The graph
 <!-- npm: link -->

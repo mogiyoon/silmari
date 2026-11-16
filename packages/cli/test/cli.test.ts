@@ -186,7 +186,7 @@ test('update: refreshes the generated sections of SILMARI.md, moves Migration to
   assert.match(out, /Backup: \.sil\/backups\/[0-9T-]+-update \(3 md files/); assert.match(out, /Created: \.sil\/updates\/0\.3\.0\.md/); assert.match(out, /Created: \.sil\/updates\/0\.4\.0\.md/); assert.match(out, /Created: \.sil\/updates\/0\.5\.0\.md/); assert.match(out, /Appended: CLAUDE\.md \(update notes prompt\)/); assert.match(out, /Recorded: \.sil\/config\.yaml version \d+\.\d+\.\d+ \(was 0\.2\.0, inferred from what sil init wrote\)\n/)
   assert.ok(!out.includes('0.2.0.md'), 'a 0.2.0 project (SILMARI.md has the Running section) does not get the 0.2.0 note')
   const sk = readFileSync(resolve(d, 'SILMARI.md'), 'utf8')
-  assert.match(sk, /^# SILMARI\n\nIntro kept\.\n\n## Notation\n\nEight symbols/, 'head kept, generated section replaced')
+  assert.match(sk, /^# SILMARI\n\nIntro kept\.\n\n## Notation\n\nNine symbols/, 'head kept, generated section replaced')
   assert.match(sk, /## Running a call\n\n1\. If the calling heading/); assert.match(sk, /## Subagents\n\nA step whose heading/)
   assert.match(sk, /## Flow\n\n- \[Feature work\]\(flow\.md\)\n\n## My rules\n\nBe brief\.\n\n- \[Late link\]\(flow\.md\)\n$/, 'user sections in their order; the line added after the old Migration section survives')
   assert.ok(!sk.includes('## Migration') && !sk.includes('## Agents'), 'Migration gone, and a heading inside its fenced example is not mistaken for a section')
@@ -195,9 +195,10 @@ test('update: refreshes the generated sections of SILMARI.md, moves Migration to
   assert.match(cl, /apply the update notes in \.sil\/updates\/: first tell the user[^\n]*then ask: "Start the silmari update\?"[^\n]*delete those files and this line/)
   assert.match(readFileSync(resolve(d, '.sil/updates/0.3.0.md'), 'utf8'), /^# silmari 0\.3\.0[\s\S]*## 1\. Tell the user first[\s\S]*Before: only md documents[\s\S]*## 2\. If yes/)
   assert.match(readFileSync(resolve(d, '.sil/config.yaml'), 'utf8'), /^entry: \[SILMARI\.md\]\nlang: ko\nversion: \d+\.\d+\.\d+/, 'the version line is added, the rest untouched')
-  assert.match(run('lint', d).stdout, /L-I07 +3 update notes not applied yet: 0\.3\.0\.md, 0\.4\.0\.md, 0\.5\.0\.md/)
+  assert.match(run('lint', d).stdout, /L-I07 +4 update notes not applied yet: 0\.3\.0\.md, 0\.4\.0\.md, 0\.5\.0\.md, 0\.9\.0\.md/)
   assert.match(readFileSync(resolve(d, '.sil/updates/0.4.0.md'), 'utf8'), /project start files[\s\S]*\{\{-…\}\}/, 'the 0.4.0 note explains the flipped default and the new marker')
   assert.match(readFileSync(resolve(d, '.sil/updates/0.5.0.md'), 'utf8'), /Files as outputs and inputs[\s\S]*\{\{>report\}\}[\s\S]*\{\{<report\}\}[\s\S]*\{\{=Build the report\}\}/, 'the 0.5.0 note carries the file write/import values and {{=…}} sections that 0.4.0 shipped unannounced')
+  assert.match(readFileSync(resolve(d, '.sil/updates/0.9.0.md'), 'utf8'), /command approvals[\s\S]*{{!…}}[\s\S]*--allowedTools[\s\S]*Codex/)
   const again = run('update', d).stdout
   assert.match(again, /Unchanged: SILMARI\.md\nUp to date: \d+\.\d+\.\d+\n$/)
   assert.equal(readFileSync(resolve(d, 'CLAUDE.md'), 'utf8'), cl, 'no second prompt line')
@@ -236,11 +237,11 @@ test('run: checks the call line before anything starts — (( )) label, --send n
   const r = (...a: string[]) => spawnSync(process.execPath, ['--experimental-strip-types', MAIN, 'run', ...a], { encoding: 'utf8', cwd: d })
   const ok = ['claude', '--step', 'flow.md#1', '--send', 'marker=marker.txt', '--send', 'prefs={"a":1}', '--model', 'haiku', '--tools', 'Read']
   const dry = r(...ok, '--dry-run')
-  assert.equal(dry.status, 0); assert.equal(dry.stdout.trim(), 'claude -p --output-format stream-json --verbose --no-session-persistence --model haiku --tools Read < <prompt>','no {{-…}} on the call line: the project start files reach the subagent, as people expect; sil keeps its own record, so claude saves no session')
-  assert.equal(r(...ok, '--keep-session', '--dry-run').stdout.trim(), 'claude -p --output-format stream-json --verbose --model haiku --tools Read < <prompt>', '--keep-session lets claude save the session')
+  assert.equal(dry.status, 0); assert.equal(dry.stdout.trim(), 'claude -p --output-format stream-json --verbose --no-session-persistence --strict-mcp-config --model haiku --tools Read < <prompt>','no {{-…}} on the call line: the project start files reach the subagent, as people expect; sil keeps its own record, so claude saves no session')
+  assert.equal(r(...ok, '--keep-session', '--dry-run').stdout.trim(), 'claude -p --output-format stream-json --verbose --strict-mcp-config --model haiku --tools Read < <prompt>', '--keep-session lets claude save the session')
   mkdirSync(resolve(d, '.sil')); writeFileSync(resolve(d, '.sil/config.yaml'), 'run:\n  keep_session: true\n')
-  assert.equal(r(...ok, '--dry-run').stdout.trim(), 'claude -p --output-format stream-json --verbose --model haiku --tools Read < <prompt>', 'run: keep_session keeps sessions for the whole project')
-  assert.equal(r(...ok, '--no-keep-session', '--dry-run').stdout.trim(), 'claude -p --output-format stream-json --verbose --no-session-persistence --model haiku --tools Read < <prompt>', '--no-keep-session wins over the config')
+  assert.equal(r(...ok, '--dry-run').stdout.trim(), 'claude -p --output-format stream-json --verbose --strict-mcp-config --model haiku --tools Read < <prompt>', 'run: keep_session keeps sessions for the whole project')
+  assert.equal(r(...ok, '--no-keep-session', '--dry-run').stdout.trim(), 'claude -p --output-format stream-json --verbose --no-session-persistence --strict-mcp-config --model haiku --tools Read < <prompt>', '--no-keep-session wins over the config')
   rmSync(resolve(d, '.sil'), { recursive: true, force: true })
   const p = r(...ok, '--prompt-only').stdout
   assert.match(p, /^This session runs one step of a flow as a subagent[\s\S]*the project rules you were started with still apply/, 'the prompt says the start files still apply'); assert.match(p, /## Values for this run\n- marker:\nmarker\.txt\n- prefs:\n\{"a":1\}/); assert.match(p, /keys are: report/)
@@ -262,7 +263,7 @@ test('run: checks the call line before anything starts — (( )) label, --send n
   // {{-…}} on the call line: sil adds the runtime's own switch for its project start files, and says so in the prompt
   const cut = ['--step', 'flow.md#3', '--send', 'marker=marker.txt', '--send', 'prefs={"a":1}']
   assert.equal(r('claude', ...cut, '--model', 'haiku', '--tools', 'Read', '--dry-run').stdout.trim(),
-    'claude -p --output-format stream-json --verbose --setting-sources user --no-session-persistence --model haiku --tools Read < <prompt>')
+    'claude -p --output-format stream-json --verbose --setting-sources user --no-session-persistence --strict-mcp-config --model haiku --tools Read < <prompt>')
   assert.equal(r('codex', ...cut, '-m', 'gpt-5.4-mini', '-s', 'read-only', '--dry-run').stdout.trim(),
     'codex exec --json --skip-git-repo-check -c project_doc_max_bytes=0 - -m gpt-5.4-mini -s read-only < <prompt>')
   assert.match(r('claude', ...cut, '--model', 'haiku', '--tools', 'Read', '--prompt-only').stdout,
@@ -349,7 +350,7 @@ process.stdin.setEncoding('utf8').on('data', (c) => { input += c }).on('end', as
     assert.equal(failed.status, 1, failed.stderr)
     assert.match(failed.stderr, /claude reported an error \(error_max_turns\)\. Not cached; record \.sil\/run\//)
     const call = JSON.parse(readFileSync(resolve(d, '.sil/fake-call.json'), 'utf8')) as { args: string[]; stdin: string }
-    assert.deepEqual(call.args, ['-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--model', 'haiku', '--tools', 'Read'], 'the prompt is not on the command line')
+    assert.deepEqual(call.args, ['-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--strict-mcp-config', '--model', 'haiku', '--tools', 'Read'], 'the prompt is not on the command line')
     assert.match(call.stdin, /^This session runs one step of a flow[\s\S]*\n# Checker\n\nRead \[the rules\]\(rules\.md\)\.\n[\s\S]*- spec:\nspec\.txt\n/, 'the prompt arrives on stdin')
     assert.doesNotMatch(call.stdin, /sil:|type: task|\r/, 'the CRLF frontmatter does not leak into the prompt, and the body is LF')
     const ok = sil('ok')

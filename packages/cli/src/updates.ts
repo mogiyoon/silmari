@@ -7,6 +7,27 @@
 // 0.3.1 → 0.4.0 the {{-…}} marker and the flipped default for the runtime's project start files, plus file write/import values and
 // {{=…}} execution sections, which 0.4.0 shipped without a note — the 0.5.0 note carries them).
 export const UPDATE_NOTES: Record<string, string> = {
+  '0.9.0': `# silmari 0.9.0 — command approvals
+
+## 1. Tell the user first
+
+In the user's language, explain what changed:
+
+- Before: unattended workers needed permissions.allow in Claude settings; --allowedTools was always refused by sil. Now: declare commands per step with {{!…}}, using any words, after the call link in the same paragraph as {{+…}} and {{#…}}. The orchestrator translates these words into runtime approval flags. No declaration means sil pre-approves nothing; existing runtime settings still apply.
+- Claude: pass --allowedTools "Bash(python:*)" "Bash(git status:*)" alongside --tools Read,Edit,Write,Bash. Approval rules do not restrict tools and cannot replace --tools. Both declaration and approval rules are required. Match the rule scopes to the user's words; sil does not interpret their meaning.
+- Codex: {{!…}} steps are refused with the reason. -a / --ask-for-approval and -s / --sandbox cannot enforce command-level approvals.
+- Any runtime permission denial fails the run and is never cached, even if the worker returns a normal report. The first line shows approved: […] or approved: none and the MCP policy; the run record includes declarations, rules and denials.
+- Claude --tools now adds --strict-mcp-config automatically, excluding inherited MCP servers. Explicit --mcp-config servers remain subject to tool verification.
+
+Then ask: "Start the silmari update?" If the answer is no, leave this file.
+
+## 2. If yes: what to change in the documents
+
+1. Run sil backup before editing documents.
+2. For steps that need unattended commands, add declarations such as {{!project python scripts}} and {{!git status}} after the call link. Keep the words in the user's language. Do not add blanket project approvals. Leave other steps unchanged.
+3. Match each declaration to scoped approval rules in the sil run command and keep --tools for tool limits. Existing settings need not be edited by sil.
+4. Run sil lint until error 0, then delete this note.
+`,
   '0.1.1': `# silmari 0.1.1 — what changed
 
 ## 1. Tell the user first
