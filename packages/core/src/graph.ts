@@ -97,7 +97,10 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
   const plain = (rel: string, kind: 'doc' | 'file', desc: string, file?: Node['file']) => nodes.set(rel, { id: rel, kind, title: rel, desc, headings: [], contract: null, hash: '', ...(file ? { file } : {}) })
   for (const d of docs.values()) for (const l of plannedFiles.has(d.rel) ? [] : d.links) {
     const r = resolve(d.rel, l.target)
-    if (r.kind === 'self' || r.kind === 'external') continue
+    if (r.kind === 'self' || r.kind === 'external') {
+      if (l.approvals?.length) diags.push({ code: 'L-N32', severity: 'error', where: `${d.rel}:${l.line}`, message: '{{!…}} belongs on a subagent call to an md document, not an external or self link', range: l.range })
+      continue
+    }
     const rel = r.rel!, where = `${d.rel}:${l.line}`, data = hasData(l), range = l.range
     // A subagent starts in the project root and receives only what is under it
     if (rel.startsWith('../')) diags.push({ code: 'L-N30', severity: 'warning', where, message: `Link points outside the project root: ${l.target}. A subagent starts in the project root and only files under it reach it`, range })
@@ -139,6 +142,7 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
     if (r.anchor) e.anchor = r.anchor
     if (l.tools.length) e.tools = l.tools
     if (l.model) e.model = l.model
+    if (l.approvals?.length) e.approvals = l.approvals
     if (l.noRules) e.noRules = l.noRules
     edges.push(e)
     const c = docs.get(rel)
@@ -155,8 +159,10 @@ export function buildGraph(docs: Map<string, Doc>, opts: BuildOptions = {}): Gra
     if (type === 'call' && c && !hasContract(c) && data)
       diags.push({ code: 'L-N22', severity: 'info', where, message: `${rel} is called with values but declares no {{>…}} / {{<…}} contract, so the names cannot be checked`, range })
     // Tools, model and the start-file switch apply to subagent runs only
-    if (type === 'call' && !l.isolated && (l.tools.length || l.model || l.noRules))
-      diags.push({ code: 'L-N26', severity: 'warning', where, message: `{{+…}} / {{#…}} / {{-…}} on a call that is not a subagent step have no effect. Add a (( )) label to the heading, or remove them`, range })
+    if (type === 'call' && !l.isolated && (l.tools.length || l.model || l.noRules || l.approvals?.length))
+      diags.push({ code: 'L-N26', severity: 'warning', where, message: `{{+…}} / {{#…}} / {{-…}} / {{!…}} on a call that is not a subagent step have no effect. Add a (( )) label to the heading, or remove them`, range })
+    if (l.approvals?.length && (type !== 'call' || r.kind !== 'md' || fileTarget))
+      diags.push({ code: 'L-N32', severity: 'error', where, message: `{{!…}} belongs on a subagent call to an md document, not a file or reference link`, range })
     if (type === 'call' && l.isolated && !l.tools.length && !l.model)
       diags.push({ code: 'L-N25', severity: 'info', where, message: `Subagent call names no {{+tools}} or {{#model}}; it runs with whatever the caller passes`, range })
     if (type === 'call' && l.tools.length) {

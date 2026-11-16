@@ -1,6 +1,6 @@
 // Reads the title, description, heading tree, links, data, and contract from a file. Design document §1 and §2.
 // Every marker is a symbol, so the parser never depends on a language: `[ ]( )` call · `{{>}}` send / input contract heading ·
-// `{{<}}` receive / output contract heading · `{{=}}` execution heading · `{{+}}` tools · `{{#}}` model · `{{-}}` run without the project start files · `(( ))` subagent.
+// `{{<}}` receive / output contract heading · `{{=}}` execution heading · `{{+}}` tools · `{{#}}` model · `{{!}}` approvals · `{{-}}` run without the project start files · `(( ))` subagent.
 // The words inside them are free.
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
@@ -27,7 +27,7 @@ const CONTRACT_HEAD = /^\{\{([<>])([^}]*)\}\}$/
 const CONTRACT_HEAD_PREFIX = /^\{\{[<>][^}]*\}\}\s*\S/
 const EXEC_HEAD = /^\{\{=([^}]*)\}\}$/
 const EXEC_HEAD_PREFIX = /^\{\{=[^}]*\}\}\s*\S/
-const MARK = /\{\{([<>*+#-])([^}]*)\}\}/g
+const MARK = /\{\{([<>*+#!-])([^}]*)\}\}/g
 /** A value inside a link target: `[doc](../references/{{>topic}}.md)`. Filled from the document's own inputs when the step runs. */
 export const PARAM = /\{\{>([^}]*)\}\}/g
 export const NAME = /^[\p{L}\p{N}][\p{L}\p{N}_-]*$/u // Letters from any language are allowed. Spaces and symbols are not.
@@ -40,6 +40,8 @@ export interface Link {
   params: string[]
   /** `{{+…}}` after the link: the tools the subagent may use, in the author's words. `{{#…}}`: its model. Free text; the orchestrator translates them into its runtime's flags. */
   tools: string[]; model: string | null
+  /** `{{!…}}`: commands this step may execute without asking. Free text, translated by the orchestrator. */
+  approvals: string[]
   /** `{{-…}}` after the link: run this subagent without the runtime's project start files (CLAUDE.md · AGENTS.md · …).
    *  Null when the marker is absent, which is the default: a subagent inherits them, as people expect. The words inside are the author's. */
   noRules: string | null
@@ -150,11 +152,13 @@ export function parseDoc(rel: string, src: string): Doc {
         const isExecutionTarget = execution !== null && !executionTargets.has(execution)
         if (isExecutionTarget) executionTargets.add(execution)
         last = { text, target: decodeURIComponent(target), line, range, params,
-                 sends: [], returns: [], tools: [], model: null, noRules: null,
+                 sends: [], returns: [], tools: [], model: null, approvals: [], noRules: null,
                  execution: execution === null ? null : { section: execution, target: isExecutionTarget },
                  under, isolated: iso, refstyle: n.type === 'linkReference' }
         doc.links.push(last)
       } else if (n.type === 'text') {
+        if (/\{\{!/.test(n.value.replace(/\{\{![^{}]*\}\}/g, '')))
+          doc.diags.push({ code: 'L-N33', severity: 'error', where: `${rel}:${line}`, message: 'Malformed approval marker: write {{!…}} with nonempty words inside and two braces on each side', range: { start: B(n.position!.start.offset!), end: B(n.position!.end.offset!) } })
         for (const m of n.value.matchAll(MARK)) {
           const kind = m[1], name = m[2].trim()
           const o = n.position!.start.offset!
@@ -164,6 +168,7 @@ export function parseDoc(rel: string, src: string): Doc {
           // Tools and model are free text for the orchestrator; only value names have a syntax
           if (kind === '+') { last.tools.push(name); continue }
           if (kind === '#') { last.model = name; continue }
+          if (kind === '!') { last.approvals.push(name); continue }
           // The start-file switch. Free text like tools and model: the words say why, the marker says what to do
           if (kind === '-') { last.noRules = name; continue }
           if (!NAME.test(name)) { doc.diags.push({ code: 'L-N04', severity: 'error', where: `${rel}:${line}`, message: `Invalid name: {{${kind}${name}}}`, range }); continue }
@@ -179,6 +184,7 @@ export function parseDoc(rel: string, src: string): Doc {
     if (n.type === 'heading') {
       const raw = rawLines[n.position!.start.line - 1].replace(/^#{1,6}\s+/, '').trim()
       const hrange = { start: B(n.position!.start.offset!), end: B(n.position!.end.offset!) }
+      if (/\{\{!/.test(textOf(n.children))) doc.diags.push({ code: 'L-N13', severity: 'error', where: `${rel}:${L(n)}`, message: '{{!…}} belongs after a call link in the same paragraph, not in a heading', range: hrange })
       let text = raw
       const a = ANCHOR.exec(text); if (a) { doc.anchors.add(a[1]); text = text.slice(0, a.index).trim() }
       const anchor = a ? a[1].trim() : undefined
@@ -249,7 +255,7 @@ export function parseDoc(rel: string, src: string): Doc {
       return
     }
     if (n.type === 'paragraph') handleBlock(n.children, L(n))
-    else if (n.type === 'blockquote') handleBlock(n.children.flatMap((c) => (c.type === 'paragraph' ? c.children : [])), L(n))
+    else if (n.type === 'blockquote') { for (const c of n.children) walk(c) }
     else if (n.type === 'table') handleBlock(n.children.flatMap((r) => r.children.flatMap((c) => c.children)), L(n))
   }
   for (const n of tree.children) walk(n)

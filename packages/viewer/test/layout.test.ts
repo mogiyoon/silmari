@@ -7,7 +7,7 @@ import { loadDir, existsIn, buildGraph, readConfig } from '@silmari/core/node'
 import { layout, labelBox, SIZE, entryView, skeleton } from '../src/layout.ts'
 
 // The golden corpus lives with core's tests; the personal migration corpus sits outside the repository (notes/ is ignored) and is used only where present
-const CORPORA: [string, string][] = [['after', resolve(import.meta.dirname, '../../core/test/fixtures/after')], ['mogiyoon', resolve(import.meta.dirname, '../../../notes/examples/mogiyoon')]]
+const CORPORA: [string, string][] = [['after', resolve(import.meta.dirname, '../../core/test/fixtures/after')], ['studio', resolve(import.meta.dirname, '../../../examples/studio')], ['pipeline', resolve(import.meta.dirname, '../../../examples/pipeline')], ['mogiyoon', resolve(import.meta.dirname, '../../../notes/examples/mogiyoon')]]
 for (const [dir, root] of CORPORA) {
   test(`layout: ${dir}`, { skip: !existsSync(root) && 'private corpus not present' }, () => {
     const g = buildGraph(loadDir(root, [], readConfig(root).words), { exists: existsIn(root) })
@@ -323,4 +323,22 @@ test('entry view: the entry document registers flows by linking them; start file
   // The start file is placed before the entry point, and the entry point one column to its right
   const sk = skeleton(g, [...all])
   assert.equal(sk.rank.get('CLAUDE.md'), 0); assert.equal(sk.rank.get('SILMARI.md'), 1); assert.equal(sk.rank.get('a.md'), 2)
+})
+
+test('entry view: a reference document the entry links is registered when it leads to a task (a guide), not when it leads nowhere (rules)', async () => {
+  const { parseDoc } = await import('@silmari/core/node')
+  const docs = new Map([
+    ['SILMARI.md', parseDoc('SILMARI.md', '# SILMARI\n\n## Flow\n\n- [Design](a.md)\n- [Job hunt entry](guide.md)\n- [Rules](RULES.md)\n')],
+    ['guide.md', parseDoc('guide.md', '# Guide\n\n## Case 1\n[Job hunt](b.md)\n\n## Case 2\n[Tailoring](c.md)\n')],
+    ['RULES.md', parseDoc('RULES.md', '# Rules\n\nBe brief.\n')],
+    ['a.md', parseDoc('a.md', '# A\n\nCall [d](d.md) with {{>x}}.\n')],
+    ['b.md', parseDoc('b.md', '# B\n\nCall [d](d.md) with {{>x}}.\n')],
+    ['c.md', parseDoc('c.md', '# C\n\nCall [d](d.md) with {{>x}}.\n')],
+    ['d.md', parseDoc('d.md', '# D\n\n## {{>Inputs}}\n- x\n')],
+  ])
+  const g = buildGraph(docs, { entry: ['SILMARI.md'] })
+  const v = entryView(g, new Set(g.nodes.map((n) => n.id)))!
+  assert.equal(g.nodes.find((n) => n.id === 'guide.md')?.kind, 'doc', 'the guide carries no values, so it is a reference by kind')
+  assert.deepEqual(v.starters, ['a.md', 'guide.md'], 'the guide is registered; the rules document is not')
+  assert.ok(v.downstream('guide.md').has('b.md') && v.downstream('guide.md').has('c.md'), 'the flows behind the guide open from it')
 })

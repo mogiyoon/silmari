@@ -52,7 +52,7 @@ Two principles hold everywhere: **the notation has no language** (every marker i
 
 ## Notation
 
-Eight symbols. The words inside them are free, in any language.
+Nine symbols. The words inside them are free, in any language.
 
 | Symbol | Meaning |
 |---|---|
@@ -60,6 +60,7 @@ Eight symbols. The words inside them are free, in any language.
 | \`{{>name}}\` | Send this value to the call |
 | \`{{<name}}\` | Receive this value from the call |
 | \`{{+…}}\` | The tools the subagent may use, in your words: \`{{+read}}\` \`{{+파일 읽기}}\` |
+| \`{{!…}}\` | Commands this subagent may run without asking, in your words: \`{{!project python scripts}}\` \`{{!git status}}\` |
 | \`{{#…}}\` | The model the subagent runs on, in your words: \`{{#fast}}\` \`{{#가장 작은 모델}}\` |
 | \`{{-…}}\` | Run this subagent without the project start files (CLAUDE.md · AGENTS.md · …), in your words: \`{{-without the project rules}}\` \`{{-프로젝트 규칙 없이}}\` |
 | \`## {{=Run the CLI}}\` | The first link in this section is executed, even when it carries no values |
@@ -81,6 +82,8 @@ Eight symbols. The words inside them are free, in any language.
    where \`<runtime>\` is the CLI you are running in, and \`<runtime flags>\` are that CLI's own flags that apply the model named by \`{{#…}}\` and restrict the tools to those named by \`{{+…}}\`. For claude: \`--model <name> --tools <Tool,Tool>\`. For codex: \`-m <name> -s <sandbox>\`. Example:
    \`sil run claude --step flow.md#1 --send posting=@posting.md --model haiku --tools Read\`
    Use the JSON it prints as the received values. \`sil run --help\` lists the runtimes and their flags.
+   **Command approvals.** Declare each scope with \`{{!…}}\` after the call link in the same paragraph as \`{{+…}}\` and \`{{#…}}\`. Translate these words separately from the tool limits: for Claude, \`{{!project python scripts}} {{!git status}}\` can become \`--allowedTools "Bash(python:*)" "Bash(git status:*)"\`, alongside \`--tools Read,Edit,Write,Bash\`. These rules work in non-interactive \`claude -p\`; they approve permissions and never restrict the tool list. Without a declaration, approval flags are refused and sil pre-approves nothing. A declaration without approval rules is also refused. Codex's \`-a\` / \`--ask-for-approval\` and \`-s\` / \`--sandbox\` cannot express per-command approvals, so a Codex step with \`{{!…}}\` is refused with the reason. The orchestrator is responsible for matching the free words to the rules; sil checks their presence, not their meaning. Existing runtime permission settings still apply.
+   With Claude \`--tools\`, sil adds \`--strict-mcp-config\` to exclude inherited MCP servers; explicitly supplied \`--mcp-config\` servers remain subject to tool verification. The first line and run record show \`approved: […]\` or \`approved: none\`, the declarations and the MCP policy. Any permission denial reported by the runtime makes the run fail, even if the worker returns a successful report; it is recorded and never cached.
    \`{{-…}}\` on the call line needs no flag of yours: \`sil run\` adds the runtime's own switch for the project start files.
 2. If the heading has no \`(( ))\` label, read the called file and follow its steps yourself. Tools and model do not apply; you keep your own.
 3. Values on the call line (\`{{>name}}\`) exist only for this run. Fill them in and pass each one with \`--send name=…\`. A \`{{>name}}\` inside the call's link target is sent the same way: \`[조립자](agents/{{>track}}-composer.md)\` needs \`--send track=resume\`. It only chooses the file and is not passed to the called document. The hint on that name in the called document's \`{{>…}}\` list says what to send, and \`sil run\` checks it before anything starts:
@@ -117,7 +120,7 @@ Moving an existing document to the notation means putting the flow where the par
 3. **One call, one line.** Each step of the orchestrator is a numbered heading with a link to the called file and the values on that line: \`[Analyst](agents/analyst.md) with {{>posting}} and receive {{<analysis}}\`. A step that must run isolated ends its heading with \`((use a subagent via sil run))\`. A loop or retry is a heading that states its condition and its bound (\`## 5. If validation fails (up to 2 times)\`) with the call below it. Parallel work is a heading that says "for each". A step that runs a script or a CLI instead of an agent is a \`## {{=…}}\` heading whose first link is what runs; the shell commands stay in an ordinary code block below it.
 4. **Link every file the agent reads or writes.** A split-out agent document links the rule documents it needs (\`Follow the [coding rules](../RULES.md)\`) and every other file it opens: md, json, log alike. Subagents receive files only through such links; a file name in backticks is not a link. When the file depends on a value, put the value in the target: \`[the reference](../references/{{>topic}}.md)\`. A file the step writes is a link with the value on it, \`[the report](out/report.md) stores {{>report}}\`; a file it reads back from disk is \`[the report](out/report.md) as {{<report}}\`. The path may not exist until the step has run: the graph shows it as a planned file, not a broken link.
 5. **Diagrams, pseudocode and transfer tables stay, but do not count.** The parser cannot read mermaid, a while loop, or a "data passed between agents" table. Copy what they say onto the call lines; leave the originals for people.
-6. **Value names are one word.** Letters, digits, \`_\`, \`-\`. No spaces, no symbols: \`{{>slug}}\`, not \`{{>company slug}}\`. Use the same name at the sender, the receiver, and in the contract. Words inside \`{{+…}}\`, \`{{#…}}\` and \`(( ))\` are free.
+6. **Value names are one word.** Letters, digits, \`_\`, \`-\`. No spaces, no symbols: \`{{>slug}}\`, not \`{{>company slug}}\`. Use the same name at the sender, the receiver, and in the contract. Words inside \`{{+…}}\`, \`{{#…}}\`, \`{{!…}}\` and \`(( ))\` are free.
 7. **Values attach to calls and to file links, never to reference documents.** \`{{>…}}\` / \`{{<…}}\` after a link to an md document is a call; after a link to any other file it is a write or an import. A link to a rules or reference md carries no \`{{ }}\`.
 8. **Prose stays prose.** Background, rationale, error handling, examples: leave them as they are. The notation appears only on lines with calls and on contract headings.
 9. **Finish with \`sil lint\`.** Repeat until it reports error 0 and the last line shows task and call counts above 0. Warnings that remain should be real mismatches, not notation mistakes.

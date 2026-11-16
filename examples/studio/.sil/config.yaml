@@ -1,0 +1,6 @@
+entry: [SILMARI.md]
+lang: ko
+version: 0.8.0
+scan:
+  exclude: [".sil/backups/**", "out/**"]
+strict: false

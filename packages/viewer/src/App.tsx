@@ -20,6 +20,8 @@ import { DICTS, LangCtx, initialLang, saveLang, useLang, type Lang } from './i18
 import { GLCanvas, glHit, type GLEdge, type GLNode } from './gl.tsx'
 import { type Cell, type LabelOrder, cells, skeleton, entryView, nodeSize, secPos, secHeight, SEC_W, SIZE, edgeLabelRows } from './layout.ts'
 import { routePath, labelRoute, plainRoute, sameColRoute, returnRoute as returnPath, readRoute as readPath, dropRoute, CORNER_R, RT_Y, STRIP } from './route.ts'
+import { viewGraph, focusOf, LINE_GROUPS, type LineGroup } from './view.ts'
+import { FlowView, type CanvasView } from './FlowView.tsx'
 import { loadLocal, saveLocal, loadFile, setFileSink, scheduleFileSave, flushFileSave, serverSink, webviewSink, readFileText, edgeKey, type Saved } from './store.ts'
 
 const KIND: Record<NodeKind, { color: string }> = {
@@ -273,9 +275,20 @@ function Loading({ phase, error }: { phase: Phase; error: string | null }) {
 
 function Inner() {
   const { t, lang, setLang } = useLang()
-  const { graph, live, error, mode, root, phase, text: graphText } = useGraph()
+  const { graph: full, live, error, mode, root, phase, text: fullText } = useGraph()
   const [off, setOff] = useState<Set<NodeKind>>(new Set())
   const [sel, setSel] = useState<string | null>(null)
+  // The line groups the canvas draws (view.ts). Calls only at first; the legend switches the others. Remembered per browser
+  const [lines, setLinesRaw] = useState<LineGroup[]>(() => { try { const v = JSON.parse(localStorage.getItem('silmari:lines') ?? 'null') as unknown; return Array.isArray(v) ? LINE_GROUPS.filter((x) => v.includes(x)) : ['call'] } catch { return ['call'] } })
+  const setLines = (next: LineGroup[]) => { setLinesRaw(next); try { localStorage.setItem('silmari:lines', JSON.stringify(next)) } catch { /* */ } }
+  // What the canvas shows: the graph, or one of the flow views (FlowView.tsx). Remembered per browser
+  const [canvasView, setCanvasViewRaw] = useState<CanvasView>(() => { try { const v = localStorage.getItem('silmari:canvasView'); return v === 'spine' || v === 'lanes' ? v : 'graph' } catch { return 'graph' } })
+  const nextCanvasView = () => setCanvasViewRaw((v) => { const n: CanvasView = v === 'graph' ? 'spine' : v === 'spine' ? 'lanes' : 'graph'; try { localStorage.setItem('silmari:canvasView', n) } catch { /* */ } return n })
+  // The selected document's file data opens beside it while that group is off
+  const vfocus = useMemo(() => (full && !lines.includes('data') ? focusOf(full, sel) : null), [full, sel, lines])
+  // `graph` below is what the canvas draws; the right panel gets `full`
+  const graph = useMemo(() => (full ? viewGraph(full, { lines, focus: vfocus }) : null), [full, lines, vfocus])
+  const graphText = graph === full ? fullText : null
   const [selHead, setSelHead] = useState<{ doc: string; line: number } | null>(null)
   const [hov, setHov] = useState<string | null>(null)
   const [hovHead, setHovHead] = useState<{ doc: string; line: number } | null>(null) // the heading box under the cursor, when it is one
@@ -679,7 +692,8 @@ function Inner() {
     // Keep earlier measurements. Otherwise React Flow drops handle positions. It does not remeasure same-sized nodes, so edges disappear
     setRfNodes((prev) => { const m = new Map(prev.map((x) => [x.id, x.measured])); return out.map((x) => (m.get(x.id) ? { ...x, measured: m.get(x.id) } : x)) })
     // Fit the view only when the graph or filter changes. This keeps zoom steady during expansion and collapse
-    const key = `${graph.stats.files}|${graph.stats.edges}|${JSON.stringify(flowMode)}|${[...visibleAll].join(',')}` // folding a subtree keeps the viewport
+    // Files that opened beside the selected document (file data off) do not count: selecting one must not refit the view
+    const key = `${graph.stats.files}|${graph.stats.edges}|${lines.join(',')}|${JSON.stringify(flowMode)}|${[...visibleAll].filter((id) => lines.includes('data') || byId.get(id)?.kind !== 'file').join(',')}` // folding a subtree keeps the viewport
     // Not while the layout worker is still computing: there is nothing to fit yet, and the fit must happen once the positions arrive
     if (!laying && fitKey.current !== key) { fitKey.current = key; if (winIds) { pendingFit.current = null; fitAll.current() } else pendingFit.current = out.map((x) => x.id).join('|') } // fit once exactly these nodes are committed (below)
   }, [graph, shown, visibleAll, open, placed, laying, isolatedTargets, saved.nodes, setRfNodes, fitView, flowMode, cellList, winIds, kidsOf, hiddenBelow, nodeH, outsideCallers, entryInfo]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -745,12 +759,12 @@ function Inner() {
         {(laying || printing) && <div className="busy" role="status"><span className="spin" />{printing ? t.printing : t.laying}</div>}
         <LodCtx.Provider value={lod}>
         <ReactFlow className={useGL && !domShow ? 'domhide' : undefined} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange}
-                   onNodeClick={(_, x) => { if (x.type === 'cell') { setView({ cell: (x as CN).data.key }); return } if (x.type === 'sec') { const d = (x as SN).data; setSel(d.doc); setSelHead({ doc: d.doc, line: d.h.line }) } else { setSel(x.id); setSelHead(null) } }}
+                   onNodeClick={(_, x) => { if (x.type === 'cell') { setView({ cell: (x as CN).data.key }); return } if (x.type === 'sec') { const d = (x as SN).data; setSel(d.doc); setSelHead({ doc: d.doc, line: d.h.line }) } else { if (full && focusOf(full, x.id) !== vfocus) pin(x.id); setSel(x.id); setSelHead(null) } }}
                    onNodeDoubleClick={(_, x) => { if (x.type === 'sil' && (x as RN).data.sil.kind !== 'ghost') toggle(x.id) }}
                    onPaneClick={(ev) => {
                      // A click that reached the pane missed every DOM node, so it may be on a rectangle the layer drew: hit-test those
                      if (useGL) { const { transform: [tx, ty, zoom], domNode } = rfStore.getState(); const r = domNode?.getBoundingClientRect(); if (r) { const n = glHit(glNodes, { tx, ty, zoom }, ev.clientX - r.left, ev.clientY - r.top); setSel(n && !layerHide?.has(n.id) ? n.id : null); setSelHead(null); return } }
-                     setSel(null); setSelHead(null) }}
+                     if (vfocus) pin(vfocus); setSel(null); setSelHead(null) }}
                    onNodeDrag={(_, x) => { if (x.type === 'sil') update((s) => ({ ...s, nodes: { ...s.nodes, [x.id]: { x: x.position.x, y: x.position.y } } })) }}
                    onNodeDragStop={(_, x) => { if (x.type === 'sil') update((s) => ({ ...s, nodes: { ...s.nodes, [x.id]: { x: x.position.x, y: x.position.y } } })) }}
                    // Highlight only on real pointer movement. After a wheel zoom the browser fires a mouse move at the same spot by itself
@@ -764,7 +778,8 @@ function Inner() {
           {!useGL && <MiniMap pannable zoomable nodeColor={(x) => (x.type === 'sec' ? '#334155' : x.type === 'cell' ? '#475569' : KIND[(x as RN).data.sil.kind].color)} maskColor="rgba(15,23,42,.7)" />}
         </ReactFlow>
         </LodCtx.Provider>
-        <Legend />
+        {canvasView !== 'graph' && full && <FlowView graph={full} kind={canvasView} only={flowRoot || (typeof flowMode === 'object' && 'cell' in flowMode) ? visibleAll : undefined} sel={sel} onSelect={(id) => { setSel(id); setSelHead(null) }} />}
+        {canvasView === 'graph' && <Legend lines={lines} setLines={(g) => { fitKey.current = ''; setLines(lines.includes(g) ? lines.filter((x) => x !== g) : LINE_GROUPS.filter((x) => x === g || lines.includes(x))) }} />}
         {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
         <div className="topbar">
           {flowRoot && (<>
@@ -779,7 +794,7 @@ function Inner() {
       </div>
       <EditCtx.Provider value={{ editable, editing, drafts, setDraft, notify: (kind, text) => { setToast({ kind, text }); setTimeout(() => setToast(null), 4000) } }}>
         <UiCtx.Provider value={{ secs: uiSecs, flipSec, det: uiDet, setDet }}>
-        {sideOpen && <Side graph={graph} live={live} error={error} off={off} setOff={setOff} cellList={cellList} entryInfo={entryInfo} mode={flowMode} setView={setView} visible={visibleAll} sel={sel} setSel={setSel} selHead={selHead} open={open} toggle={toggle} edit={{ editing, dirty: dirty.length, start: () => { setRaw(null); setEditing(true) }, save: saveEdit, cancel: cancelEdit, raw, startRaw, saveRaw, cancelRaw: () => setRaw(null), setRawText: (text) => setRaw((r) => (r ? { ...r, text } : r)) }} />}
+        {sideOpen && <Side graph={full!} live={live} error={error} off={off} setOff={setOff} cellList={cellList} entryInfo={entryInfo} mode={flowMode} setView={setView} visible={visibleAll} sel={sel} setSel={setSel} selHead={selHead} open={open} toggle={toggle} edit={{ editing, dirty: dirty.length, start: () => { setRaw(null); setEditing(true) }, save: saveEdit, cancel: cancelEdit, raw, startRaw, saveRaw, cancelRaw: () => setRaw(null), setRawText: (text) => setRaw((r) => (r ? { ...r, text } : r)) }} />}
         </UiCtx.Provider>
       </EditCtx.Provider>
       {/* Menu rail at the right edge. It toggles the panel and stays visible while the panel is closed */}
@@ -789,6 +804,8 @@ function Inner() {
         </button>
         <button className="railbtn lang" onClick={() => setLang(lang === 'ko' ? 'en' : 'ko')} title={t.langSwitchTitle} aria-label={t.langSwitchTitle}>{t.langSwitch}</button>
         <button className={`railbtn lang${labelOrder === 'flow' ? ' on' : ''}`} onClick={toggleOrder} title={t.orderTitle(labelOrder)} aria-label={t.orderTitle(labelOrder)}>{labelOrder === 'flow' ? t.orderFlow : t.orderChildren}</button>
+        {/* The canvas: the graph, the flows as spines (A), or as swimlanes (B). One button cycles through them */}
+        <button className={`railbtn lang${canvasView !== 'graph' ? ' on' : ''}`} onClick={nextCanvasView} title={t.canvasViewTitle(canvasView)} aria-label={t.canvasViewTitle(canvasView)}>{canvasView === 'graph' ? '⌗' : canvasView === 'spine' ? 'A' : 'B'}</button>
         {kidsOf.size > 0 && flowMode !== 'map' && flowMode !== 'entry' && <button className={`railbtn lang${collapsed.size ? ' on' : ''}`} onClick={collapsed.size ? unfoldAll : foldAll} title={collapsed.size ? t.expandAll : t.collapseAll} aria-label={collapsed.size ? t.expandAll : t.collapseAll}>{collapsed.size ? '▸▸' : '◂◂'}</button>}
         {/* Reset layout: only while there is something to forget (dragged nodes or labels, or folds the user changed) */}
         {(Object.keys(saved.nodes).length > 0 || Object.keys(saved.labels).length > 0 || saved.collapsed) && (
@@ -899,17 +916,20 @@ function Side({ graph, live, error, off, setOff, cellList, entryInfo, mode, setV
   )
 }
 
-/** Legend. Calls, references, provenance, node kinds, and subagents. */
-function Legend() {
+/** Legend. Calls, references, provenance, node kinds, and subagents. The three line rows are switches: a row that is off is not drawn */
+function Legend({ lines, setLines }: { lines: LineGroup[]; setLines: (g: LineGroup) => void }) {
   const { t } = useLang()
   const line = (dash: string | undefined, color: string) => (
     <svg width="34" height="10"><line x1="1" y1="5" x2="33" y2="5" stroke={color} strokeWidth="1.6" strokeDasharray={dash} /></svg>
   )
+  const sw = (g: LineGroup, dash: string | undefined, color: string, label: string) => (
+    <button className={`lsw${lines.includes(g) ? '' : ' off'}`} onClick={() => setLines(g)} title={t.lineSwitch} aria-pressed={lines.includes(g)}>{line(dash, color)}<span>{label}</span></button>
+  )
   return (
     <div className="legend">
-      <div>{line(undefined, '#cbd5e1')}<span>{t.legendCall}</span></div>
-      <div>{line(undefined, '#2dd4bf')}<span>{t.legendData}</span></div>
-      <div>{line('6 4', '#94a3b8')}<span>{t.legendRef}</span></div>
+      {sw('call', undefined, '#cbd5e1', t.legendCall)}
+      {sw('data', undefined, '#2dd4bf', t.legendData)}
+      {sw('ref', '6 4', '#94a3b8', t.legendRef)}
       <div>{line('6 4', '#f87171')}<span>{t.legendMissing}</span></div>
       <div><i style={{ background: KIND.task.color }} /><span>{t.legendTask}</span><i style={{ background: KIND.doc.color }} /><span>{t.legendDoc}</span><i style={{ background: KIND.file.color }} /><span>{t.legendFile}</span><i style={{ background: KIND.ghost.color }} /><span>{t.legendGhost}</span></div>
       <div><i className="isoi" /><span>{t.legendSubagent}</span></div>

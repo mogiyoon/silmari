@@ -383,3 +383,23 @@ test('{{-…}}: the start-file switch is free text on the call line, reaches the
   ]))
   assert.equal(none.edges.find((x) => x.to === 'b.md')!.noRules, undefined)
 })
+
+test('{{!…}} approvals are free words on a subagent call and retain their scopes in the graph', () => {
+  const flow = '# Flow\n\n## 1. Work ((서브에이전트))\nCall [worker](worker.md) and receive {{<done}}.\nUse {{+bash}} and run {{!프로젝트 python 스크립트}} and {{!git status}}.\n'
+  const doc = parseDoc('flow.md', flow)
+  assert.deepEqual(doc.links[0].approvals, ['프로젝트 python 스크립트', 'git status'])
+  const g = buildGraph(new Map([['flow.md', doc], ['worker.md', parseDoc('worker.md', '# Worker' + TASK)]]))
+  assert.deepEqual(g.edges[0].approvals, doc.links[0].approvals)
+  assert.ok(!g.diagnostics.some((d) => ['L-N04', 'L-N13', 'L-N26', 'L-N32', 'L-N33'].includes(d.code)))
+  assert.ok(codes({ 'flow.md': flow.replace(' ((서브에이전트))', ''), 'worker.md': '# Worker' + TASK }).includes('L-N26'))
+  assert.ok(parseDoc('a.md', '# A\n\n{{!git status}}\n').diags.some((d) => d.code === 'L-N13'))
+  assert.ok(parseDoc('a.md', '# A\n\n[b](b.md)\n\n{{!git status}}\n').diags.some((d) => d.code === 'L-N13'))
+  assert.ok(parseDoc('a.md', '# A\n\n> [b](b.md)\n>\n> {{!git status}}\n').diags.some((d) => d.code === 'L-N13'))
+  assert.ok(parseDoc('a.md', '# A\n\n[b](b.md) {{! }}\n').diags.some((d) => d.code === 'L-N18'))
+  assert.ok(parseDoc('a.md', '# A\n\n[b](b.md) {{!git status}\n').diags.some((d) => d.code === 'L-N33'))
+  assert.ok(parseDoc('a.md', '# A {{!git status}}\n').diags.some((d) => d.code === 'L-N13'))
+  assert.ok(codes({ 'a.md': '# A\n\n## 1. Work ((sub))\n[file](spec.json) {{!git status}}\n' }).includes('L-N32'))
+  assert.ok(codes({ 'a.md': '# A\n\n[site](https://example.com) {{!git status}}\n' }).includes('L-N32'))
+  assert.ok(codes({ 'a.md': '# A\n\n## {{=Run}}\n[file](script.py) {{!git status}}\n' }).includes('L-N32'))
+  assert.equal(parseDoc('a.md', '# A\n\n`{{!git status}}`\n\n```md\n{{!broken\n```\n').diags.length, 0, 'code examples are not declarations')
+})
