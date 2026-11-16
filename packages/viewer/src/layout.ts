@@ -469,7 +469,7 @@ function layoutOne(g: Graph, ids: string[], open: Set<string>, sizes: Map<number
 
 /**
  * The entry view. The entry document (SILMARI.md) registers flows by linking them; those links are the only starting points here.
- * `starters` are the task documents the entry document links, in link order. `startFiles` are the documents that link the entry
+ * `starters` are the documents the entry document links that are tasks or lead to one, in link order. `startFiles` are the documents that link the entry
  * document and that nobody calls (the agent start files). `downstream(s)` is everything reachable from a starter without passing
  * through the entry document again. null when there is no visible entry document or it links no task, so the viewer falls back
  * to the connectivity view. The graph itself is untouched: this is a visibility filter over it.
@@ -482,7 +482,11 @@ export function entryView(g: Graph, visible: Set<string>): EntryView | null {
   // A registration is a plain link (`[Feature work](flow.md)` in SILMARI.md's Flow section). A link that carries values is a call: the
   // entry document is then itself a flow, its steps are not flows of their own, and the connectivity view shows the whole thing
   const starters: string[] = []
-  for (const e of g.edges) if (e.from === entry && e.to !== entry && e.type !== 'call' && visible.has(e.to) && kind.get(e.to) === 'task' && !starters.includes(e.to)) starters.push(e.to)
+  // A task the entry links is registered; so is a reference document that links a task itself: a guide that only points onward
+  // (`job-hunt-entry.md`, no values, so a reference by kind) was left out and every flow behind it vanished from the overview
+  // (2026-09-26). A rules document the entry links leads to no task and is still not a flow
+  const leadsToTask = (id: string) => g.edges.some((e) => e.from === id && e.to !== id && e.to !== entry && kind.get(e.to) === 'task')
+  for (const e of g.edges) if (e.from === entry && e.to !== entry && e.type !== 'call' && visible.has(e.to) && (kind.get(e.to) === 'task' || (kind.get(e.to) === 'doc' && leadsToTask(e.to))) && !starters.includes(e.to)) starters.push(e.to)
   if (!starters.length) return null
   const called = new Set(g.edges.filter((e) => e.from !== e.to && visible.has(e.from)).map((e) => e.to))
   const startFiles = [...new Set(g.edges.filter((e) => e.to === entry && e.from !== entry && visible.has(e.from) && !called.has(e.from)).map((e) => e.from))]

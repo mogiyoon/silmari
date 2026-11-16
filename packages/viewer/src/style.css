@@ -87,6 +87,8 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
 .resetbtn:hover { color: #e2e8f0 }
 .legend { position: absolute; left: 12px; bottom: 44px; z-index: 5; font-size: 11px; color: #cbd5e1; background: rgba(15,23,42,.85); border: 1px solid #334155; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px }
 .legend > div { display: flex; align-items: center; gap: 7px }
+.legend .lsw { display: flex; align-items: center; gap: 7px; background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; text-align: left }
+.legend .lsw.off { opacity: .35 } .legend .lsw.off span { text-decoration: line-through } .legend .lsw:hover { color: #fff }
 .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px } .legend i.isoi { background: transparent; border: 2px solid #a78bfa; border-radius: 3px }
 .el .row { line-height: 18px; flex-wrap: wrap; gap: 4px }
 .el .row .tag { margin-right: 2px }
@@ -220,3 +222,34 @@ html, body, #root { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0
   /* a plain print from the browser menu, without the sheet: the picture as it is on screen, without the chrome */
   .rail, .side, .topbar, .legend, .toast, .busy, .printmenu, .react-flow__controls, .react-flow__minimap, .react-flow__background, .react-flow__attribution, .react-flow__panel { display: none !important }
 }
+
+
+/* Flow views (FlowView.tsx · flows.ts): drawn over the graph canvas */
+.fv { position: absolute; inset: 0; z-index: 4; background: #111418; overflow: hidden; cursor: grab; touch-action: none }
+.fv:active { cursor: grabbing }
+.fv-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0 }
+.fv svg { display: block; overflow: visible }
+.fv svg text { font-size: 12px; fill: #e5e9f0; font-family: inherit }
+.fv [data-id] { cursor: pointer }
+.fv-frame { fill: #161b22; stroke: #2b3442 } .fv-d1 > .fv-frame { fill: #1a212b } .fv-d2 > .fv-frame { fill: #1f2733 }
+.fv .fv-title { font-size: 14px; font-weight: 700; fill: #f8fafc }
+.fv-step rect { fill: #2563eb } .fv-step.iso rect { stroke: #a78bfa; stroke-width: 2.5 } .fv-step.exec rect { fill: #334155; stroke: #fcd34d; stroke-width: 1.5 }
+.fv-step.quiet rect { fill: none; stroke: #475569; stroke-dasharray: 4 3 } .fv .fv-step.quiet text { fill: #94a3b8 } .fv .fv-step text { font-weight: 600 }
+.fv-leaf rect { fill: #0f172a; stroke: #3b82f6 } .fv-file rect { fill: #334155 } .fv-ghost rect { fill: #450a0a; stroke: #f87171 }
+.fv-entry rect { fill: #059669 } .fv-router rect { fill: #0f172a; stroke: #34d399 }
+.fv-next { stroke: #e2e8f0; stroke-width: 2.2; fill: none } .fv-hang { stroke: #64748b; stroke-width: 1.3; fill: none }
+.fv-loop { stroke: #f59e0b; stroke-width: 1.8; fill: none; stroke-dasharray: 6 3 }
+.fv-pick { stroke: #34d399; stroke-width: 1.8; fill: none } .fv-pickmark { fill: none; stroke: #34d399; stroke-width: 1.5 }
+.fv-share { stroke: #c084fc; stroke-width: 1.3; fill: none; stroke-dasharray: 2 3 } .fv-sharedot { fill: #c084fc } .fv .fv-sharelab { font-size: 10.5px; fill: #c084fc }
+.fv-sharemark { fill: none; stroke: #c084fc; stroke-width: 1.5; stroke-dasharray: 3 2 }
+.fv .fv-carry { font-size: 10.5px; fill: #5eead4 } .fv .fv-ret { font-size: 10.5px; fill: #fbbf24 }
+.fv-lane { stroke: #2b3442 } .fv-lane.own { stroke: #3b82f6 }
+.fv-lanelab rect { fill: #0f172a; stroke: #3b82f6 } .fv-lanelab.own rect { fill: #2563eb } .fv-lanelab.file rect { fill: #334155; stroke: none }
+.fv-bcall { stroke: #e2e8f0; stroke-width: 1.8 } .fv-bcall.iso { stroke: #a78bfa } .fv-bret { stroke: #fbbf24; stroke-width: 1.3; stroke-dasharray: 4 3 } .fv-dot { fill: #e2e8f0 }
+.fv-bracket path { stroke: #64748b; fill: none } .fv .fv-bracket text { font-size: 11px; fill: #cbd5e1; font-weight: 600 } .fv .fv-bracket.quiet text { fill: #64748b }
+.fv-mk-next { fill: #e2e8f0 } .fv-mk-hang { fill: #64748b } .fv-mk-loop { fill: #f59e0b } .fv-mk-pick { fill: #34d399 } .fv-mk-ret { fill: #fbbf24 }
+/* the selected document, wherever it is drawn */
+.fv .fv-sel rect { stroke: #fff !important; stroke-width: 2.5 !important } .fv text.fv-sel { fill: #fff; text-decoration: underline }
+.fv-legend { cursor: default } .fv-legend svg { flex: none } .fv-legend text { font-size: 10.5px; font-family: inherit }
+.fv-bracket-l { stroke: #64748b; fill: none }
+.fv-sharelane { pointer-events: stroke }
