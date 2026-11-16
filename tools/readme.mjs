@@ -69,7 +69,7 @@ export function build(text = readFileSync(SRC, 'utf8')) {
     else if (s.marker === 'link') body.push(s.lines[0], '', `See [${s.heading}](${REPO}#${slug(s.heading)}) in the repository README.`, '')
   }
   const head = '<!-- Generated from README.md at the repository root by tools/readme.mjs. Edit that file, then run: pnpm readme -->'
-  const tail = `Full guide, rule list, and the graph's controls: ${REPO}`
+  const tail = `Documentation and examples: ${REPO}#documentation`
   const text2 = [head, ...absolutize(body, kept), tail].join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n'
   return text2
 }
