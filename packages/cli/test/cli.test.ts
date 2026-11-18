@@ -171,6 +171,21 @@ test('init: creates SILMARI.md and makes all four agent start files refer to it;
   for (const x of [a, b, c, d, e]) rmSync(x, { recursive: true, force: true })
 })
 
+test('init completes with escaped autolinks in existing Markdown and preserves those documents', () => {
+  const d = resolve(tmpdir(), `sil-init-autolink-${process.pid}`)
+  rmSync(d, { recursive: true, force: true }); mkdirSync(d)
+  try {
+    const src = '# 기존 자료\r\n\r\nwww\\.example.com 및 user&#64;example.com\r\n'
+    writeFileSync(resolve(d, 'README.md'), src)
+    const r = run('init', d, '--lang=ko')
+    assert.equal(r.status, 0, r.stderr)
+    for (const f of ['SILMARI.md', 'CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.github/copilot-instructions.md', '.sil/config.yaml'])
+      assert.ok(existsSync(resolve(d, f)), f)
+    assert.equal(readFileSync(resolve(d, 'README.md'), 'utf8'), src)
+    assert.equal(run('init', d).status, 0)
+  } finally { rmSync(d, { recursive: true, force: true }) }
+})
+
 test('update: refreshes the generated sections of SILMARI.md, moves Migration to .sil/migration.md, writes the update notes with a prompt line, records the version; a second run changes nothing; lint points at it', () => {
   const d = resolve(tmpdir(), `sil-update-${process.pid}`); rmSync(d, { recursive: true, force: true }); mkdirSync(resolve(d, '.sil'), { recursive: true })
   // A project as sil init 0.3.0 left it: no version in the config, a Migration section (with fenced examples) in SILMARI.md, the old question line
