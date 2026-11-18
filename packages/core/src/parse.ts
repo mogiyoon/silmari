@@ -71,7 +71,15 @@ const stripCode = (s: string) => s.replace(/`[^`]*`/g, (m) => ' '.repeat(m.lengt
 /** Converts a UTF-16 offset to a byte offset (INV-8). */
 export const byteOffset = (src: string, u16: number) => utf8Length(src, u16)
 
-const processor = unified().use(remarkParse).use(remarkGfm)
+const processor = unified().use(remarkParse).use(remarkGfm).use(function sourceLinks() {
+  // GFM's second autolink pass converts decoded text (e.g. www\.example.com or
+  // user&#64;example.com) into links and drops positions from surrounding text too.
+  // silmari needs source ranges for edits (INV-8). Keep the syntax-level autolinks,
+  // tables, etc., but leave these display-only links as their original text.
+  for (const extension of this.data().fromMarkdownExtensions?.flat() ?? []) {
+    if (extension.enter?.literalAutolink) extension.transforms = []
+  }
+})
 
 /** The only frontmatter silmari defines is the `sil:` block (`sil:\n  type: task|doc`). Every other key belongs to some other tool and is left alone. */
 function frontmatter(src: string): { fm: Record<string, string>; body: string; bodyLineOffset: number } {
